@@ -3,8 +3,9 @@ title: Tra Cuu Bca Bqp
 emoji: 🏛️
 colorFrom: blue
 colorTo: purple
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 5.20.0
+app_file: app.py
 pinned: false
 ---
 
