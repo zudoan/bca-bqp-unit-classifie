@@ -76,8 +76,23 @@ STATUS_INFO = {
 }
 
 
-# ── 2. Search Logic ───────────────────────────────────────────────────────────
+try:
+    import spaces
+except ImportError:
+    spaces = None
 
+if spaces is not None:
+    @spaces.GPU
+    def _zero_gpu_check():
+        """ZeroGPU startup detector."""
+        return True
+
+def _gpu_decorator(func):
+    if spaces is not None:
+        return spaces.GPU(func)
+    return func
+
+@_gpu_decorator
 def search_organization_ui(org_name, org_id, province, org_type, scorer, threshold, top_k):
     org_name = (org_name or "").strip()
     org_id = (org_id or "").strip()
@@ -681,4 +696,4 @@ with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP", css=CUSTOM_CSS, theme=gr
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(ssr=False)
