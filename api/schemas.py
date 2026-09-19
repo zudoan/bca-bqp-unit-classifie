@@ -36,52 +36,22 @@ class SearchRequest(BaseModel):
         description="Loại tổ chức (mã).",
         examples=["POLICE_PROVINCE"],
     )
-    fuzzy_scorer: str = Field(
-        "WRatio",
-        description="Thuật toán Fuzzy: WRatio | ratio | token_sort_ratio | token_set_ratio",
-    )
-    fuzzy_threshold: float = Field(
-        85.0,
-        ge=50,
-        le=100,
-        description="Ngưỡng điểm tối thiểu cho ứng viên fuzzy.",
-    )
-    fuzzy_top_k: int = Field(
-        5,
-        ge=1,
-        le=20,
-        description="Số ứng viên fuzzy tối đa.",
-    )
 
 
-# ── Response helpers ─────────────────────────────────────────────────────────
-
-class CandidateItem(BaseModel):
-    organization_id: str
-    organization_name: str
-    province_name: str | None = None
-    organization_type_code: str = ""
-    organization_level: str | None = None
-    parent_organization_id: str | None = None
-    score: float | int | None = None
-    matched_on: str | None = None
-    management: str | None = None
-
+# ── Response ─────────────────────────────────────────────────────────────────
 
 class SearchResponse(BaseModel):
-    """Unified response envelope for every match status."""
+    """Unified binary response: MATCH_100 or UNKNOWN."""
 
-    match_status: str
-    match_score: float | int | None = None
+    status: str = Field(description="Kết quả: MATCH_100 hoặc UNKNOWN")
+    match_status: str = Field(description="Trạng thái so khớp kỹ thuật")
+    match_score: int | None = Field(None, description="100 nếu đúng chính xác")
     organization_id: str | None = None
     organization_name: str | None = None
     province_name: str | None = None
     organization_type_code: str | None = None
-    management: str | None = None
-    candidates: list[CandidateItem] | None = None
-    top1_score: float | int | None = None
-    top2_score: float | int | None = None
-    score_margin: float | None = None
+    management: str | None = Field(None, description="BCA hoặc BQP")
+    message: str | None = None
     reason: str | None = None
     errors: list[str] | None = None
 

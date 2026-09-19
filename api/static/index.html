@@ -24,26 +24,10 @@
 
         <hr class="sidebar-divider">
 
-        <div class="sidebar-section-title">⚙️ Cấu hình Matching Engine</div>
-
-        <label class="sidebar-label" for="cfgScorer">Thuật toán Fuzzy</label>
-        <select id="cfgScorer">
-            <option value="WRatio" selected>WRatio (khuyến nghị)</option>
-            <option value="ratio">ratio</option>
-            <option value="token_sort_ratio">token_sort_ratio</option>
-            <option value="token_set_ratio">token_set_ratio</option>
-        </select>
-
-        <div class="range-wrapper">
-            <label class="sidebar-label" for="cfgThreshold">Ngưỡng Fuzzy (cutoff)</label>
-            <input type="range" id="cfgThreshold" min="50" max="100" value="85" step="5">
-            <div class="range-value" id="cfgThresholdVal">85</div>
-        </div>
-
-        <div class="range-wrapper">
-            <label class="sidebar-label" for="cfgTopK">Số ứng viên tối đa (Top-K)</label>
-            <input type="range" id="cfgTopK" min="1" max="20" value="5" step="1">
-            <div class="range-value" id="cfgTopKVal">5</div>
+        <div class="sidebar-section-title">⚙️ Chế độ Tìm kiếm</div>
+        <div style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 0.75rem; font-size: 0.8rem; color: #34D399; line-height: 1.4;">
+            🔒 <strong>Strict Deterministic Search:</strong><br>
+            Đảm bảo kết quả đúng 100% hoặc Unknown. Tuyệt đối không phỏng đoán hay gợi ý ứng viên mờ.
         </div>
 
         <hr class="sidebar-divider">

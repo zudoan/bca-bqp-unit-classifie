@@ -1,6 +1,7 @@
 """Hugging Face Spaces Application — Organization Matching Registry (BCA / BQP).
 
-Powered by Gradio + Matching Engine. Native ZeroGPU & Hugging Face Spaces compatibility.
+Strict Deterministic Binary Search (100% Match or UNKNOWN).
+Native ZeroGPU & Hugging Face Spaces compatibility.
 """
 
 from __future__ import annotations
@@ -63,19 +64,17 @@ TYPE_CODE_LABELS = {
 }
 
 STATUS_INFO = {
-    "EXACT_ID_MATCH": ("Khớp chính xác mã ID (100%)", "chip-resolved"),
-    "EXACT_NAME_MATCH": ("Khớp chính xác tên (100%)", "chip-resolved"),
-    "NORMALIZED_MATCH": ("Khớp tên sau chuẩn hóa (100%)", "chip-resolved"),
-    "SEARCH_KEY_MATCH": ("Khớp không dấu / Search Key (100%)", "chip-resolved"),
-    "ALIAS_MATCH": ("Khớp tên viết tắt / Tên gọi khác (100%)", "chip-resolved"),
-    "RESOLVED": ("Khớp chính xác (100%)", "chip-resolved"),
-    "FUZZY_CANDIDATES": ("So khớp mờ / Fuzzy Matching", "chip-fuzzy"),
-    "AMBIGUOUS_MATCH": ("Trùng tên — Cần thêm ngữ cảnh", "chip-ambiguous"),
-    "NOT_FOUND": ("Không tìm thấy", "chip-notfound"),
-    "INVALID_INPUT": ("Dữ liệu đầu vào không hợp lệ", "chip-invalid"),
+    "EXACT_ID_MATCH": "Khớp chính xác mã ID",
+    "EXACT_NAME_MATCH": "Khớp chính xác tên tổ chức",
+    "NORMALIZED_MATCH": "Khớp tên sau chuẩn hóa",
+    "SEARCH_KEY_MATCH": "Khớp không dấu (Search Key)",
+    "ALIAS_MATCH": "Khớp tên viết tắt / Tên gọi khác",
+    "RESOLVED": "Khớp chính xác",
+    "NOT_FOUND": "Không có dữ liệu",
+    "INVALID_INPUT": "Dữ liệu không hợp lệ",
 }
 
-
+# ── ZeroGPU Support ──────────────────────────────────────────────────────────
 try:
     import spaces
 except ImportError:
@@ -84,7 +83,6 @@ except ImportError:
 if spaces is not None:
     @spaces.GPU
     def _zero_gpu_check():
-        """ZeroGPU startup detector."""
         return True
 
 def _gpu_decorator(func):
@@ -92,8 +90,11 @@ def _gpu_decorator(func):
         return spaces.GPU(func)
     return func
 
+
+# ── 2. Strict Binary Search Logic ─────────────────────────────────────────────
+
 @_gpu_decorator
-def search_organization_ui(org_name, org_id, province, org_type, scorer, threshold, top_k):
+def search_organization_ui(org_name, org_id, province, org_type):
     org_name = (org_name or "").strip()
     org_id = (org_id or "").strip()
     province = province if province else None
@@ -108,12 +109,8 @@ def search_organization_ui(org_name, org_id, province, org_type, scorer, thresho
         </div>
         """
 
-    # Build per-request service with chosen fuzzy config
-    config = MatchingConfig(
-        fuzzy_scorer=scorer or "WRatio",
-        fuzzy_minimum_score=float(threshold),
-        fuzzy_top_k=int(top_k),
-    )
+    # Strict deterministic service (no fuzzy guessing, no candidates)
+    config = MatchingConfig(strict_mode=True)
     service = OrganizationSearchService(repo, config)
 
     res = service.search_organization(
@@ -123,35 +120,21 @@ def search_organization_ui(org_name, org_id, province, org_type, scorer, thresho
         organization_type=org_type,
     )
 
-    status = res.get("match_status", "UNKNOWN")
+    status = res.get("status", "UNKNOWN")
+    match_status = res.get("match_status", "UNKNOWN")
     norm_val = normalize_name(org_name) if org_name else "—"
     search_key_val = to_search_key(org_name) if org_name else "—"
 
-    # Enrich candidates with management
-    candidates = res.get("candidates") or []
-    for c in candidates:
-        cid = c.get("organization_id")
-        if cid:
-            try:
-                c["management"] = repo.get_management(cid)
-            except Exception:
-                c["management"] = None
-
-    is_deterministic = status in {
-        "EXACT_ID_MATCH", "EXACT_NAME_MATCH", "NORMALIZED_MATCH",
-        "SEARCH_KEY_MATCH", "ALIAS_MATCH", "RESOLVED"
-    }
-
     html_out = ['<div class="result-container">']
 
-    # ── CASE A: DETERMINISTIC MATCH ──
-    if is_deterministic:
+    # ── CASE 1: MATCH_100 (ĐÚNG 100%) ──
+    if status == "MATCH_100":
         mgmt = res.get("management", "N/A")
         is_bca = mgmt == "BCA"
         is_bqp = mgmt == "BQP"
         badge_cls = "badge-bca" if is_bca else ("badge-bqp" if is_bqp else "badge-bca")
         mgmt_name = "Bộ Công an" if is_bca else ("Bộ Quốc phòng" if is_bqp else mgmt)
-        info_label, chip_cls = STATUS_INFO.get(status, (status, "chip-resolved"))
+        info_label = STATUS_INFO.get(match_status, match_status)
         type_code = res.get("organization_type_code", "")
         type_label = TYPE_CODE_LABELS.get(type_code, type_code or "—")
 
@@ -162,7 +145,7 @@ def search_organization_ui(org_name, org_id, province, org_type, scorer, thresho
                 <div class="{badge_cls}">{html.escape(mgmt)}</div>
                 <div class="badge-label">{html.escape(mgmt_name)}</div>
                 <div style="margin-top: 10px;">
-                    <span class="status-chip {chip_cls}">✅ {html.escape(info_label)}</span>
+                    <span class="status-chip chip-resolved">✅ ĐÚNG 100% — {html.escape(info_label)}</span>
                 </div>
             </div>
 
@@ -194,181 +177,34 @@ def search_organization_ui(org_name, org_id, province, org_type, scorer, thresho
         </div>
         """)
 
-    # ── CASE B: FUZZY CANDIDATES ──
-    elif status == "FUZZY_CANDIDATES":
-        top1 = candidates[0] if candidates else None
-        top1_score = res.get("top1_score") or (top1.get("score") if top1 else 0)
-        top2_score = res.get("top2_score")
-        margin = res.get("score_margin")
-
-        top1_html = ""
-        if top1:
-            top1_mgmt = top1.get("management") or "N/A"
-            is_bca = top1_mgmt == "BCA"
-            is_bqp = top1_mgmt == "BQP"
-            badge_cls = "badge-bca" if is_bca else ("badge-bqp" if is_bqp else "badge-bca")
-            mgmt_name = "Bộ Công an" if is_bca else ("Bộ Quốc phòng" if is_bqp else top1_mgmt)
-            type_code = top1.get("organization_type_code", "")
-            type_label = TYPE_CODE_LABELS.get(type_code, type_code or "—")
-
-            top1_html = f"""
-            <div class="badge-header">
-                <div class="badge-subtitle">GỢI Ý CƠ QUAN QUẢN LÝ (TOP 1 ỨNG VIÊN)</div>
-                <div class="{badge_cls}">{html.escape(top1_mgmt)}</div>
-                <div class="badge-label">{html.escape(mgmt_name)}</div>
-                <div style="margin-top: 10px;">
-                    <span class="status-chip chip-fuzzy">🔍 FUZZY TOP-1 ({top1_score}%)</span>
-                </div>
-            </div>
-
-            <div class="banner banner-warn">
-                ⚡ <strong>So khớp mờ (Fuzzy Match):</strong> Không có khớp chính xác 100%. 
-                Tìm thấy <strong>{len(candidates)}</strong> ứng viên có điểm tương đồng ≥ {threshold}%.
-                <br>• Điểm cao nhất: <strong>{top1_score}%</strong>
-                {f' • Top-2: <strong>{top2_score}%</strong>' if top2_score else ''}
-                {f' • Cách biệt: <strong>{margin} điểm</strong>' if margin is not None else ''}
-            </div>
-
-            <div class="section-title">🎯 Ứng viên phù hợp nhất (Top 1)</div>
-            <div class="info-table">
-                <div class="info-row">
-                    <span class="info-k">Mã tổ chức</span>
-                    <span class="info-v mono">{html.escape(top1.get('organization_id') or '—')}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-k">Tên chính thức</span>
-                    <span class="info-v bold">{html.escape(top1.get('organization_name') or '—')}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-k">Tỉnh / Thành phố</span>
-                    <span class="info-v">{html.escape(top1.get('province_name') or 'Trung ương / Toàn quốc')}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-k">Loại tổ chức</span>
-                    <span class="info-v">{html.escape(type_label)} <code class="type-code">({html.escape(type_code)})</code></span>
-                </div>
-                <div class="info-row">
-                    <span class="info-k">Cơ quan chủ quản dự kiến</span>
-                    <span class="info-v" style="color: {'#60A5FA' if is_bca else '#34D399'}; font-weight: 700;">
-                        {html.escape(top1_mgmt)} — {html.escape(mgmt_name)}
-                    </span>
-                </div>
-            </div>
-            """
-
-        html_out.append(f"""
-        <div class="result-card">
-            {top1_html}
-        </div>
-        """)
-
-    # ── CASE C: AMBIGUOUS MATCH ──
-    elif status == "AMBIGUOUS_MATCH":
+    # ── CASE 2: UNKNOWN (KHÔNG CÓ DỮ LIỆU) ──
+    else:
         html_out.append(f"""
         <div class="result-card">
             <div style="text-align: center; margin-bottom: 12px;">
-                <span class="status-chip chip-ambiguous">⚠️ AMBIGUOUS_MATCH (Trùng tên — Cần thêm ngữ cảnh)</span>
-            </div>
-            <div class="banner banner-warn">
-                ⚠️ <strong>Phát hiện {len(candidates)} tổ chức trùng tên:</strong> 
-                Hệ thống không tự ý suy diễn để bảo đảm an toàn dữ liệu. 
-                Vui lòng mở mục "Tra cứu nâng cao" và chọn thêm <strong>Tỉnh / Thành phố</strong> hoặc <strong>Loại tổ chức</strong> để phân định chính xác.
-            </div>
-        </div>
-        """)
-
-    # ── CASE D: NOT FOUND ──
-    elif status == "NOT_FOUND":
-        reason = res.get("reason", "")
-        reason_map = {
-            "ORGANIZATION_ID_NOT_FOUND": "Mã tổ chức không tồn tại trong Registry.",
-            "DETERMINISTIC_MATCH_CONTEXT_MISMATCH": "Tìm thấy tên tổ chức nhưng tỉnh/loại tổ chức không khớp với điều kiện lọc.",
-            "NO_CANDIDATE_ABOVE_FUZZY_THRESHOLD": f"Không có ứng viên nào đạt ngưỡng điểm tối thiểu ({threshold}%).",
-        }
-        reason_text = reason_map.get(reason, reason or "Không tìm thấy kết quả nào phù hợp trong Registry.")
-        html_out.append(f"""
-        <div class="result-card">
-            <div style="text-align: center; margin-bottom: 12px;">
-                <span class="status-chip chip-notfound">❌ NOT FOUND (Không tìm thấy)</span>
+                <span class="status-chip chip-notfound">❌ UNKNOWN (Không có dữ liệu)</span>
             </div>
             <div class="banner banner-danger">
-                ❌ <strong>Không tìm thấy:</strong> {html.escape(reason_text)}
+                ❌ <strong>Không có dữ liệu cho đơn vị này:</strong> Hệ thống không tìm thấy tổ chức nào khớp chính xác 100% trong cơ sở dữ liệu BCA / BQP.
             </div>
             <div style="font-size: 13px; color: #9CA3AF; margin-top: 10px; line-height: 1.6;">
-                💡 <strong>Gợi ý:</strong>
+                💡 <strong>Nguyên tắc tìm kiếm (Strict Deterministic):</strong>
                 <ul style="margin-left: 20px;">
-                    <li>Kiểm tra lại chính tả hoặc nhập từ khóa ngắn gọn hơn (VD: "Công an Thái Bình").</li>
-                    <li>Hạ ngưỡng Fuzzy (thanh gạt ở mục Nâng cao, VD: 75 hoặc 80).</li>
+                    <li>Hệ thống chỉ kết luận khi khớp chính xác 100% (qua Tên, Mã ID, Tên không dấu hoặc Tên viết tắt).</li>
+                    <li>Tuyệt đối không phỏng đoán hay đưa ra ứng viên xấp xỉ nhằm đảm bảo tính an toàn dữ liệu.</li>
+                    <li>Vui lòng kiểm tra lại chính tả hoặc mở "Tra cứu nâng cao" để nhập trực tiếp mã tổ chức (nếu có).</li>
                 </ul>
             </div>
         </div>
         """)
 
-    # ── CASE E: INVALID INPUT ──
-    elif status == "INVALID_INPUT":
-        errs = res.get("errors") or [res.get("reason") or "Dữ liệu không hợp lệ."]
-        err_items = "".join([f"<li>{html.escape(e)}</li>" for e in errs])
-        html_out.append(f"""
-        <div class="result-card">
-            <div style="text-align: center; margin-bottom: 12px;">
-                <span class="status-chip chip-invalid">🚫 INVALID INPUT (Dữ liệu không hợp lệ)</span>
-            </div>
-            <div class="banner banner-danger">
-                <ul>{err_items}</ul>
-            </div>
-        </div>
-        """)
-
-    # ── CANDIDATES SECTION ──
-    if candidates and len(candidates) > 0:
-        c_cards = []
-        for idx, c in enumerate(candidates, 1):
-            sc = c.get("score")
-            sc_str = f"{round(sc)}%" if sc is not None else "—"
-            c_mgmt = c.get("management")
-            mgmt_badge = ""
-            if c_mgmt:
-                is_bca_c = c_mgmt == "BCA"
-                mgmt_badge = f"""
-                <span class="badge-mini {'bca' if is_bca_c else 'bqp'}">{html.escape(c_mgmt)}</span>
-                """
-            t_label = TYPE_CODE_LABELS.get(c.get("organization_type_code", ""), c.get("organization_type_code", ""))
-
-            c_cards.append(f"""
-            <div class="cand-card">
-                <div class="cand-top">
-                    <div>
-                        <span class="cand-rank">#{idx}</span>
-                        <span class="cand-name">{html.escape(c.get('organization_name') or '—')}</span>
-                        {mgmt_badge}
-                        <div class="cand-meta">
-                            Mã: <code>{html.escape(c.get('organization_id') or '—')}</code>
-                            {f" • Tỉnh: <strong>{html.escape(c.get('province_name'))}</strong>" if c.get('province_name') else ''}
-                            {f" • Loại: <em>{html.escape(t_label)}</em>" if t_label else ''}
-                            {f" • Khớp: <code>{html.escape(c.get('matched_on'))}</code>" if c.get('matched_on') else ''}
-                        </div>
-                    </div>
-                    <div class="cand-score">
-                        <div class="cand-num">{sc_str}</div>
-                        <div class="cand-score-label">Điểm khớp</div>
-                    </div>
-                </div>
-            </div>
-            """)
-
-        html_out.append(f"""
-        <div class="result-card" style="margin-top: 14px;">
-            <div class="section-title">👥 Danh sách ứng viên ({len(candidates)})</div>
-            {''.join(c_cards)}
-        </div>
-        """)
-
-    # ── PIPELINE TRACE SECTION ──
+    # ── PIPELINE TRACE ──
+    is_matched = status == "MATCH_100"
     decision_text = f"{status}"
     if res.get("management"):
         decision_text += f" → {res.get('management')}"
-    elif candidates and candidates[0].get("management"):
-        decision_text += f" → {candidates[0].get('management')} (Dự kiến)"
+    else:
+        decision_text += " → Không có dữ liệu"
 
     html_out.append(f"""
     <div class="result-card" style="margin-top: 14px;">
@@ -389,19 +225,19 @@ def search_organization_ui(org_name, org_id, province, org_type, scorer, thresho
             <div class="trace-v mono">{html.escape(search_key_val)}</div>
         </div>
         <div class="trace-step">
-            <div class="trace-dot {'active' if is_deterministic else 'inactive'}"></div>
-            <div class="trace-k">4. Exact Match:</div>
-            <div class="trace-v mono">{'HIT (100%)' if is_deterministic else 'MISS'}</div>
+            <div class="trace-dot {'active' if is_matched else 'inactive'}"></div>
+            <div class="trace-k">4. Strict Match:</div>
+            <div class="trace-v mono">{'HIT (100% - ' + html.escape(match_status) + ')' if is_matched else 'MISS (No exact match)'}</div>
         </div>
         <div class="trace-step">
-            <div class="trace-dot {'active' if not is_deterministic else 'inactive'}"></div>
+            <div class="trace-dot inactive"></div>
             <div class="trace-k">5. Fuzzy Match:</div>
-            <div class="trace-v mono">{scorer} (Threshold: {threshold}%, Top-K: {top_k})</div>
+            <div class="trace-v mono" style="color: #9CA3AF;">DISABLED (Strict Mode: 100% or Unknown)</div>
         </div>
         <div class="trace-step">
             <div class="trace-dot active"></div>
             <div class="trace-k">6. Kết luận:</div>
-            <div class="trace-v bold" style="color: #60A5FA;">{html.escape(decision_text)}</div>
+            <div class="trace-v bold" style="color: {'#60A5FA' if is_matched else '#F87171'};">{html.escape(decision_text)}</div>
         </div>
     </div>
     """)
@@ -509,16 +345,6 @@ body, .gradio-container {
     color: #34D399;
     border: 1px solid rgba(16,185,129,0.3);
 }
-.chip-fuzzy {
-    background: rgba(245,158,11,0.15);
-    color: #FBBF24;
-    border: 1px solid rgba(245,158,11,0.3);
-}
-.chip-ambiguous {
-    background: rgba(249,115,22,0.15);
-    color: #FB923C;
-    border: 1px solid rgba(249,115,22,0.3);
-}
 .chip-notfound, .chip-invalid {
     background: rgba(239,68,68,0.15);
     color: #F87171;
@@ -566,36 +392,6 @@ body, .gradio-container {
     color: #F87171;
 }
 
-.cand-card {
-    background: rgba(15, 18, 28, 0.6);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-}
-.cand-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-}
-.cand-rank { color: #60A5FA; font-weight: 700; font-size: 15px; }
-.cand-name { font-weight: 600; font-size: 14px; color: #F3F4F6; margin-left: 6px; }
-.cand-meta { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
-.cand-score { text-align: right; min-width: 60px; }
-.cand-num { font-size: 16px; font-weight: 700; color: #34D399; }
-.cand-score-label { font-size: 10px; color: #6B7280; }
-
-.badge-mini {
-    display: inline-block;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 700;
-    margin-left: 6px;
-}
-.badge-mini.bca { background: rgba(37,99,235,0.25); color: #93C5FD; border: 1px solid rgba(37,99,235,0.4); }
-.badge-mini.bqp { background: rgba(5,150,105,0.25); color: #6EE7B7; border: 1px solid rgba(5,150,105,0.4); }
-
 .trace-step {
     display: flex;
     align-items: center;
@@ -616,14 +412,14 @@ body, .gradio-container {
 .trace-v.bold { font-weight: 700; }
 """
 
-with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP", css=CUSTOM_CSS, theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate")) as demo:
+with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP (Strict Mode)", css=CUSTOM_CSS, theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate")) as demo:
     gr.HTML("""
     <div style="text-align: center; padding: 16px 0 10px;">
         <h1 style="font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, #4F8BF9, #7C3AED, #EC4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
             🏛️ Tra cứu Tổ chức — BCA / BQP
         </h1>
         <p style="color: #9CA3AF; font-size: 14px; margin-top: 4px;">
-            Nhập tên hoặc mã tổ chức → Entity Resolution (Exact / Fuzzy Matching) → Kết luận cơ quan chủ quản BCA hay BQP
+            Hệ thống Strict Deterministic Search: Đúng 100% hoặc Unknown (Không phỏng đoán mờ)
         </p>
     </div>
     """)
@@ -641,35 +437,27 @@ with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP", css=CUSTOM_CSS, theme=gr
         with gr.Column(scale=4):
             input_name = gr.Textbox(
                 label="🔍 Tên tổ chức cần tra cứu",
-                placeholder="Ví dụ: Công an tỉnh Thái Bình, Bộ CHQS tỉnh Quảng Ninh, Cong an Thanh pho Ha Noi...",
+                placeholder="Ví dụ: Công an tỉnh Thái Bình, Bộ CHQS tỉnh Quảng Ninh, cong an tinh thai binh...",
                 lines=1,
             )
         with gr.Column(scale=1):
             btn_search = gr.Button("🔍 Tra cứu ngay", variant="primary", scale=1)
 
-    with gr.Accordion("🔧 Tra cứu nâng cao & Cấu hình Matching Engine", open=False):
+    with gr.Accordion("🔧 Tra cứu nâng cao (Lọc theo ID, Tỉnh/TP, Loại)", open=False):
         with gr.Row():
-            input_id = gr.Textbox(label="Mã tổ chức (ID nếu biết)", placeholder="VD: BCA-PROVINCE-002153")
+            input_id = gr.Textbox(label="Mã tổ chức (ID)", placeholder="VD: BCA-PROVINCE-002153")
             input_province = gr.Dropdown(label="Tỉnh / Thành phố", choices=provinces, value="")
             input_type = gr.Dropdown(label="Loại tổ chức", choices=type_codes, value="")
-
-        with gr.Row():
-            cfg_scorer = gr.Dropdown(
-                label="Thuật toán Fuzzy",
-                choices=["WRatio", "ratio", "token_sort_ratio", "token_set_ratio"],
-                value="WRatio",
-            )
-            cfg_threshold = gr.Slider(label="Ngưỡng Fuzzy tối thiểu (%)", minimum=50, maximum=100, value=85, step=5)
-            cfg_top_k = gr.Slider(label="Số ứng viên tối đa (Top-K)", minimum=1, maximum=20, value=5, step=1)
 
     gr.Examples(
         examples=[
             ["Công an tỉnh Thái Bình"],
             ["Bộ Chỉ huy Quân sự tỉnh Quảng Ninh"],
-            ["Cong an Thanh pho Ha Noi"],
-            ["Đồn Biên phòng cửa khẩu Lào Cai"],
+            ["cong an tinh thai binh"],
+            ["BCHQS huyện Sóc Sơn"],
             ["Học viện Cảnh sát nhân dân"],
             ["Học viện Kỹ thuật Quân sự"],
+            ["Đơn vị không có thật 123"],
         ],
         inputs=[input_name],
         label="💡 Thử nhanh các ví dụ mẫu",
@@ -680,17 +468,17 @@ with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP", css=CUSTOM_CSS, theme=gr
     # Wire event handlers
     btn_search.click(
         fn=search_organization_ui,
-        inputs=[input_name, input_id, input_province, input_type, cfg_scorer, cfg_threshold, cfg_top_k],
+        inputs=[input_name, input_id, input_province, input_type],
         outputs=[output_html],
     )
     input_name.submit(
         fn=search_organization_ui,
-        inputs=[input_name, input_id, input_province, input_type, cfg_scorer, cfg_threshold, cfg_top_k],
+        inputs=[input_name, input_id, input_province, input_type],
         outputs=[output_html],
     )
     input_id.submit(
         fn=search_organization_ui,
-        inputs=[input_name, input_id, input_province, input_type, cfg_scorer, cfg_threshold, cfg_top_k],
+        inputs=[input_name, input_id, input_province, input_type],
         outputs=[output_html],
     )
 

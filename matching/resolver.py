@@ -23,9 +23,8 @@ from .repository import OrganizationRepository
 
 @dataclass(frozen=True, slots=True)
 class MatchingConfig:
+    strict_mode: bool = True
     fuzzy_scorer: str = "WRatio"
-    # Seed-benchmark choice. Keep configurable and retune on reviewed real
-    # queries; Version 1 still returns candidates rather than auto-resolving.
     fuzzy_minimum_score: float = 95.0
     fuzzy_top_k: int = 5
     minimum_fuzzy_query_key_length: int = 3
@@ -51,7 +50,7 @@ class OrganizationResolver:
         )
 
     def resolve(self, request: SearchInput) -> MatchResolution:
-        """Run ID -> name -> normalized -> key -> alias -> fuzzy stages."""
+        """Run ID -> name -> normalized -> key -> alias stages (Strict Deterministic)."""
 
         if request.organization_id:
             organization = self.exact_matcher.match_id(request.organization_id)
@@ -82,6 +81,13 @@ class OrganizationResolver:
                 MatchStatus.ALIAS_MATCH,
                 alias_matches,
                 request,
+            )
+
+        # In strict mode: 100% exact match or UNKNOWN. Do not run fuzzy candidates.
+        if self.config.strict_mode:
+            return MatchResolution(
+                match_status=MatchStatus.NOT_FOUND,
+                reason="NO_EXACT_MATCH",
             )
 
         if (

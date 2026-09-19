@@ -1,5 +1,6 @@
 /**
  * Organization Matching Registry — Frontend Application Logic
+ * Strict Deterministic Binary Search (100% Match or UNKNOWN)
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -13,15 +14,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const results = document.getElementById('results');
     const emptyState = document.getElementById('emptyState');
 
-    // Sidebar & Config
+    // Sidebar
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebar = document.getElementById('sidebar');
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
-    const cfgScorer = document.getElementById('cfgScorer');
-    const cfgThreshold = document.getElementById('cfgThreshold');
-    const cfgThresholdVal = document.getElementById('cfgThresholdVal');
-    const cfgTopK = document.getElementById('cfgTopK');
-    const cfgTopKVal = document.getElementById('cfgTopKVal');
 
     // Advanced filters
     const advancedToggle = document.getElementById('advancedToggle');
@@ -58,26 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const STATUS_INFO = {
-        'EXACT_ID_MATCH': { label: 'Khớp chính xác mã ID (100%)', chipClass: 'chip-resolved', isExact: true },
-        'EXACT_NAME_MATCH': { label: 'Khớp chính xác tên (100%)', chipClass: 'chip-resolved', isExact: true },
-        'NORMALIZED_MATCH': { label: 'Khớp tên sau chuẩn hóa (100%)', chipClass: 'chip-resolved', isExact: true },
-        'SEARCH_KEY_MATCH': { label: 'Khớp không dấu / Search Key (100%)', chipClass: 'chip-resolved', isExact: true },
-        'ALIAS_MATCH': { label: 'Khớp tên viết tắt / Tên gọi khác (100%)', chipClass: 'chip-resolved', isExact: true },
-        'RESOLVED': { label: 'Khớp chính xác (100%)', chipClass: 'chip-resolved', isExact: true },
-        'FUZZY_CANDIDATES': { label: 'So khớp mờ / Fuzzy Matching', chipClass: 'chip-fuzzy', isExact: false },
-        'AMBIGUOUS_MATCH': { label: 'Trùng tên — Cần thêm ngữ cảnh', chipClass: 'chip-ambiguous', isExact: false },
-        'NOT_FOUND': { label: 'Không tìm thấy', chipClass: 'chip-notfound', isExact: false },
-        'INVALID_INPUT': { label: 'Dữ liệu đầu vào không hợp lệ', chipClass: 'chip-invalid', isExact: false },
+        'EXACT_ID_MATCH': 'Khớp chính xác mã ID',
+        'EXACT_NAME_MATCH': 'Khớp chính xác tên tổ chức',
+        'NORMALIZED_MATCH': 'Khớp tên sau chuẩn hóa',
+        'SEARCH_KEY_MATCH': 'Khớp không dấu (Search Key)',
+        'ALIAS_MATCH': 'Khớp tên viết tắt / Tên gọi khác',
+        'RESOLVED': 'Khớp chính xác',
+        'NOT_FOUND': 'Không có dữ liệu',
+        'INVALID_INPUT': 'Dữ liệu không hợp lệ',
     };
-
-    // ── Sliders ──────────────────────────────────────────────────────────────
-    cfgThreshold.addEventListener('input', () => {
-        cfgThresholdVal.textContent = cfgThreshold.value;
-    });
-
-    cfgTopK.addEventListener('input', () => {
-        cfgTopKVal.textContent = cfgTopK.value;
-    });
 
     // ── Mobile Sidebar Toggle ────────────────────────────────────────────────
     if (sidebarToggle && sidebar && sidebarBackdrop) {
@@ -165,9 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
             organization_id: orgId || null,
             province_name: province,
             organization_type: orgType,
-            fuzzy_scorer: cfgScorer.value,
-            fuzzy_threshold: parseFloat(cfgThreshold.value),
-            fuzzy_top_k: parseInt(cfgTopK.value, 10),
         };
 
         try {
@@ -186,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const data = await searchRes.json();
-            renderResults(data, payload, normRes);
+            renderBinaryResults(data, payload, normRes);
         } catch (err) {
             renderError(err.message || 'Có lỗi xảy ra khi tra cứu.');
         } finally {
@@ -225,39 +207,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ── Render Helpers ───────────────────────────────────────────────────────
+    // ── Render Helpers (Strict Binary) ───────────────────────────────────────
 
-    function renderResults(data, reqPayload, normData) {
-        const status = data.match_status;
+    function renderBinaryResults(data, reqPayload, normData) {
         let html = '';
 
-        // Deterministic Match
-        const isDeterministic = [
-            'EXACT_ID_MATCH',
-            'EXACT_NAME_MATCH',
-            'NORMALIZED_MATCH',
-            'SEARCH_KEY_MATCH',
-            'ALIAS_MATCH',
-            'RESOLVED'
-        ].includes(status);
-
-        if (isDeterministic) {
-            html += renderDeterministicCard(data, status);
-        } else if (status === 'FUZZY_CANDIDATES') {
-            html += renderFuzzyCard(data, reqPayload);
-        } else if (status === 'AMBIGUOUS_MATCH') {
-            html += renderAmbiguousCard(data);
-        } else if (status === 'NOT_FOUND') {
-            html += renderNotFoundCard(data, reqPayload);
-        } else if (status === 'INVALID_INPUT') {
-            html += renderInvalidInputCard(data);
+        if (data.status === 'MATCH_100') {
+            html += renderMatch100Card(data);
         } else {
-            html += `<div class="glass-card"><p>Trạng thái: ${escapeHtml(status)}</p></div>`;
-        }
-
-        // Candidates list
-        if (data.candidates && data.candidates.length > 0) {
-            html += renderCandidatesSection(data.candidates, status);
+            html += renderUnknownCard(data, reqPayload);
         }
 
         // Pipeline trace collapsible
@@ -276,14 +234,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderDeterministicCard(data, status) {
+    function renderMatch100Card(data) {
         const isBCA = data.management === 'BCA';
         const isBQP = data.management === 'BQP';
         const badgeClass = isBCA ? 'badge-bca' : (isBQP ? 'badge-bqp' : 'badge-bca');
         const mgmtFull = isBCA ? 'Bộ Công an' : (isBQP ? 'Bộ Quốc phòng' : (data.management || 'Chưa xác định'));
-
-        const info = STATUS_INFO[status] || { label: status, chipClass: 'chip-resolved' };
-        const score = data.match_score != null ? Math.round(data.match_score) : 100;
+        const matchTypeLabel = STATUS_INFO[data.match_status] || data.match_status;
         const typeLabel = TYPE_CODE_LABELS[data.organization_type_code] || data.organization_type_code || '—';
 
         return `
@@ -293,18 +249,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="${badgeClass}">${escapeHtml(data.management || 'N/A')}</div>
                     <div class="management-label">${escapeHtml(mgmtFull)}</div>
                     <div style="margin-top: 0.85rem;">
-                        <span class="status-chip ${info.chipClass}">✅ ${escapeHtml(info.label)}</span>
+                        <span class="status-chip chip-resolved">✅ ĐÚNG 100% — ${escapeHtml(matchTypeLabel)}</span>
                     </div>
                 </div>
 
                 <div class="detail-header">
                     <h3>📋 Chi tiết tổ chức xác định</h3>
-                    <span style="font-size: 0.85rem; color: #9CA3AF;">Độ khớp: <strong style="color: #34D399; font-size: 1rem;">${score}%</strong></span>
+                    <span style="font-size: 0.85rem; color: #34D399; font-weight: 700;">Độ chính xác: 100%</span>
                 </div>
 
                 <div class="score-bar-container">
                     <div class="score-bar-track">
-                        <div class="score-bar-fill" style="width: ${score}%; background: #34D399;"></div>
+                        <div class="score-bar-fill" style="width: 100%; background: #34D399;"></div>
                     </div>
                 </div>
 
@@ -336,200 +292,22 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    function renderFuzzyCard(data, reqPayload) {
-        const candidates = data.candidates || [];
-        const top1 = candidates.length > 0 ? candidates[0] : null;
-
-        const top1Score = data.top1_score != null ? Math.round(data.top1_score) : (top1 && top1.score != null ? Math.round(top1.score) : 0);
-        const top2Score = data.top2_score != null ? Math.round(data.top2_score) : null;
-        const margin = data.score_margin != null ? data.score_margin : (top2Score != null ? (top1Score - top2Score).toFixed(1) : null);
-
-        let top1Html = '';
-        if (top1) {
-            const isBCA = top1.management === 'BCA';
-            const isBQP = top1.management === 'BQP';
-            const badgeClass = isBCA ? 'badge-bca' : (isBQP ? 'badge-bqp' : 'badge-bca');
-            const mgmtFull = isBCA ? 'Bộ Công an' : (isBQP ? 'Bộ Quốc phòng' : (top1.management || 'Chưa xác định'));
-            const typeLabel = TYPE_CODE_LABELS[top1.organization_type_code] || top1.organization_type_code || '—';
-
-            top1Html = `
-                <div class="result-badge-section" style="padding: 1.5rem 1rem 1rem;">
-                    <div class="management-subtitle">GỢI Ý CƠ QUAN QUẢN LÝ (TOP 1 ỨNG VIÊN)</div>
-                    <div class="${badgeClass}">${escapeHtml(top1.management || 'N/A')}</div>
-                    <div class="management-label">${escapeHtml(mgmtFull)}</div>
-                    <div style="margin-top: 0.85rem;">
-                        <span class="status-chip chip-fuzzy">🔍 FUZZY TOP-1 (${top1Score}%)</span>
-                    </div>
-                </div>
-
-                <div class="safety-banner">
-                    ⚡ <strong>So khớp mờ (Fuzzy Match):</strong> Không có khớp chính xác 100%. 
-                    Tìm thấy <strong>${candidates.length}</strong> ứng viên có điểm tương đồng ≥ ${reqPayload.fuzzy_threshold}%.
-                    <br>• Điểm cao nhất: <strong>${top1Score}%</strong> 
-                    ${top2Score ? `• Top-2: <strong>${top2Score}%</strong>` : ''} 
-                    ${margin !== null ? `• Chênh lệch điểm (Margin): <strong>${margin}</strong> điểm` : ''}
-                </div>
-
-                <div class="detail-header">
-                    <h3>🎯 Ứng viên phù hợp nhất (Top 1)</h3>
-                    <span style="font-size: 0.85rem; color: #9CA3AF;">Độ khớp: <strong style="color: #FBBF24; font-size: 1rem;">${top1Score}%</strong></span>
-                </div>
-
-                <div class="score-bar-container">
-                    <div class="score-bar-track">
-                        <div class="score-bar-fill" style="width: ${top1Score}%; background: #FBBF24;"></div>
-                    </div>
-                </div>
-
-                <div style="margin-top: 1.25rem;">
-                    <div class="info-row">
-                        <span class="info-label">Mã tổ chức</span>
-                        <span class="info-value mono">${escapeHtml(top1.organization_id || '—')}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Tên tổ chức chính thức</span>
-                        <span class="info-value">${escapeHtml(top1.organization_name || '—')}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Tỉnh / Thành phố</span>
-                        <span class="info-value">${escapeHtml(top1.province_name || 'Trung ương / Toàn quốc')}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Loại tổ chức</span>
-                        <span class="info-value">${escapeHtml(typeLabel)} <code style="font-size: 0.75rem; color: #9CA3AF;">(${escapeHtml(top1.organization_type_code || '')})</code></span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Cơ quan chủ quản dự kiến</span>
-                        <span class="info-value" style="color: ${isBCA ? '#60A5FA' : '#34D399'}; font-weight: 700;">
-                            ${escapeHtml(top1.management || '—')} — ${escapeHtml(mgmtFull)}
-                        </span>
-                    </div>
-                </div>
-            `;
-        }
-
-        return `
-            <div class="glass-card">
-                ${top1Html}
-            </div>
-        `;
-    }
-
-    function renderAmbiguousCard(data) {
-        const candidates = data.candidates || [];
+    function renderUnknownCard(data, reqPayload) {
         return `
             <div class="glass-card">
                 <div style="text-align: center; margin-bottom: 1.25rem;">
-                    <span class="status-chip chip-ambiguous">⚠️ AMBIGUOUS_MATCH (Trùng tên — Cần thêm ngữ cảnh)</span>
-                </div>
-                <div class="safety-banner">
-                    ⚠️ <strong>Phát hiện ${candidates.length} tổ chức trùng tên:</strong> 
-                    Hệ thống không tự ý suy diễn để bảo đảm tính an toàn dữ liệu.
-                    <br>Vui lòng mở mục <strong>"Tra cứu nâng cao"</strong> và chọn thêm <strong>Tỉnh / Thành phố</strong> hoặc <strong>Loại tổ chức</strong> để phân định chính xác.
-                </div>
-            </div>
-        `;
-    }
-
-    function renderNotFoundCard(data, reqPayload) {
-        const reasonText = {
-            'ORGANIZATION_ID_NOT_FOUND': 'Mã tổ chức không tồn tại trong Registry.',
-            'DETERMINISTIC_MATCH_CONTEXT_MISMATCH': 'Tìm thấy tên tổ chức nhưng tỉnh/loại tổ chức không khớp với điều kiện lọc.',
-            'NO_CANDIDATE_ABOVE_FUZZY_THRESHOLD': `Không có ứng viên nào đạt ngưỡng điểm tối thiểu (${reqPayload.fuzzy_threshold}%).`,
-        }[data.reason] || data.reason || 'Không tìm thấy kết quả nào phù hợp trong Registry.';
-
-        return `
-            <div class="glass-card">
-                <div style="text-align: center; margin-bottom: 1.25rem;">
-                    <span class="status-chip chip-notfound">❌ NOT FOUND (Không tìm thấy)</span>
+                    <span class="status-chip chip-notfound">❌ UNKNOWN (Không có dữ liệu)</span>
                 </div>
                 <div class="safety-banner-red">
-                    ❌ <strong>Không tìm thấy:</strong> ${escapeHtml(reasonText)}
+                    ❌ <strong>Không có dữ liệu cho đơn vị này:</strong> Hệ thống không tìm thấy tổ chức nào khớp chính xác 100% trong cơ sở dữ liệu BCA / BQP.
                 </div>
                 <div style="font-size: 0.88rem; color: #9CA3AF; margin-top: 0.75rem; line-height: 1.6;">
-                    💡 <strong>Gợi ý tra cứu:</strong>
+                    💡 <strong>Lưu ý về thuật toán:</strong>
                     <ul style="margin-left: 1.5rem; margin-top: 0.35rem;">
-                        <li>Kiểm tra lại chính tả hoặc thử nhập từ khóa ngắn gọn hơn (VD: "Công an Thái Bình" thay vì tên quá dài).</li>
-                        <li>Hạ ngưỡng Fuzzy (thanh gạt ở menu bên trái, VD: 75 hoặc 80) để nới lỏng mức độ khớp.</li>
-                        <li>Nếu bạn biết Mã tổ chức (ID), hãy mở mục "Tra cứu nâng cao" và nhập trực tiếp mã.</li>
+                        <li>Hệ thống áp dụng cơ chế <strong>Strict Deterministic Search</strong> — chỉ kết luận khi khớp chính xác 100%, tuyệt đối không phỏng đoán hay gợi ý gần đúng.</li>
+                        <li>Kiểm tra lại chính tả của tên tổ chức (VD: "Công an tỉnh Thái Bình").</li>
+                        <li>Nếu có Mã tổ chức (ID), hãy mở "Tra cứu nâng cao" và nhập trực tiếp mã.</li>
                     </ul>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderInvalidInputCard(data) {
-        const errorList = data.errors && data.errors.length > 0 
-            ? data.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')
-            : `<li>${escapeHtml(data.reason || 'Dữ liệu đầu vào không hợp lệ.')}</li>`;
-
-        return `
-            <div class="glass-card">
-                <div style="text-align: center; margin-bottom: 1.25rem;">
-                    <span class="status-chip chip-invalid">🚫 INVALID INPUT (Dữ liệu không hợp lệ)</span>
-                </div>
-                <div class="safety-banner-red">
-                    🚫 Yêu cầu tra cứu không hợp lệ:
-                    <ul style="margin-left: 1.5rem; margin-top: 0.35rem;">
-                        ${errorList}
-                    </ul>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderCandidatesSection(candidates, status) {
-        const title = status === 'EXACT_NAME_MATCH' || status === 'EXACT_ID_MATCH'
-            ? 'Ứng viên khớp chính xác'
-            : 'Danh sách ứng viên tương tự';
-
-        const cardsHtml = candidates.map((c, idx) => {
-            const score = c.score != null ? Math.round(c.score) : '—';
-            let scoreClass = 'score-high';
-            if (typeof score === 'number') {
-                if (score < 80) scoreClass = 'score-low';
-                else if (score < 90) scoreClass = 'score-medium';
-            }
-
-            const typeLabel = TYPE_CODE_LABELS[c.organization_type_code] || c.organization_type_code || '';
-            const isBCA = c.management === 'BCA';
-            const isBQP = c.management === 'BQP';
-            const mgmtBadge = c.management ? `
-                <span style="display: inline-block; padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.72rem; font-weight: 700; background: ${isBCA ? 'rgba(37,99,235,0.2)' : 'rgba(5,150,105,0.2)'}; color: ${isBCA ? '#60A5FA' : '#34D399'}; border: 1px solid ${isBCA ? 'rgba(37,99,235,0.4)' : 'rgba(5,150,105,0.4)'}; margin-left: 0.5rem;">
-                    ${escapeHtml(c.management)}
-                </span>
-            ` : '';
-
-            return `
-                <div class="candidate-card">
-                    <div class="candidate-top">
-                        <div>
-                            <span class="candidate-rank">#${idx + 1}</span>
-                            <span class="candidate-name">${escapeHtml(c.organization_name || '—')}</span>
-                            ${mgmtBadge}
-                            <div class="candidate-meta">
-                                Mã: <code>${escapeHtml(c.organization_id || '—')}</code> 
-                                ${c.province_name ? `• Tỉnh: <strong>${escapeHtml(c.province_name)}</strong>` : ''} 
-                                ${typeLabel ? `• Loại: <em>${escapeHtml(typeLabel)}</em>` : ''}
-                                ${c.matched_on ? `• Khớp trên: <code>${escapeHtml(c.matched_on)}</code>` : ''}
-                            </div>
-                        </div>
-                        <div class="candidate-score">
-                            <div class="score-num ${scoreClass}">${score}${typeof score === 'number' ? '%' : ''}</div>
-                            <div style="font-size: 0.7rem; color: #6B7280;">Điểm khớp</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        return `
-            <div class="glass-card" style="margin-top: 1.25rem;">
-                <div class="detail-header">
-                    <h3>👥 ${title} (${candidates.length})</h3>
-                </div>
-                <div>
-                    ${cardsHtml}
                 </div>
             </div>
         `;
@@ -538,26 +316,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderPipelineTrace(data, reqPayload, normData) {
         const normText = normData ? normData.normalized : '—';
         const searchKey = normData ? normData.search_key : '—';
-
-        const isExact = [
-            'EXACT_ID_MATCH',
-            'EXACT_NAME_MATCH',
-            'NORMALIZED_MATCH',
-            'SEARCH_KEY_MATCH',
-            'ALIAS_MATCH'
-        ].includes(data.match_status);
-
-        const isFuzzy = data.match_status === 'FUZZY_CANDIDATES' || data.match_status === 'AMBIGUOUS_MATCH';
-
-        const mgmtConclusion = data.management 
-            ? ` → ${escapeHtml(data.management)}` 
-            : (data.candidates && data.candidates.length > 0 && data.candidates[0].management ? ` → ${escapeHtml(data.candidates[0].management)} (Dự kiến)` : '');
+        const isMatched = data.status === 'MATCH_100';
 
         return `
             <div class="glass-card" style="margin-top: 1.25rem;">
                 <div class="pipeline-toggle" id="pipelineToggle">
                     <span class="chevron">▶</span>
-                    <span>🔬 Pipeline Trace (Xem luồng xử lý chi tiết)</span>
+                    <span>🔬 Pipeline Trace (Luồng xử lý chi tiết)</span>
                 </div>
                 <div class="pipeline-content" id="pipelineContent">
                     <div class="pipeline-step">
@@ -576,22 +341,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="pipeline-value">${escapeHtml(searchKey)}</div>
                     </div>
                     <div class="pipeline-step">
-                        <div class="pipeline-dot ${isExact ? 'pipeline-dot-active' : 'pipeline-dot-inactive'}"></div>
-                        <div class="pipeline-label">4. Exact Match:</div>
-                        <div class="pipeline-value">${isExact ? `${escapeHtml(data.match_status)} (HIT 100%)` : 'MISS'}</div>
+                        <div class="pipeline-dot ${isMatched ? 'pipeline-dot-active' : 'pipeline-dot-inactive'}"></div>
+                        <div class="pipeline-label">4. Strict Match:</div>
+                        <div class="pipeline-value">${isMatched ? `HIT (100% - ${escapeHtml(data.match_status)})` : 'MISS (No exact match)'}</div>
                     </div>
                     <div class="pipeline-step">
-                        <div class="pipeline-dot ${isFuzzy ? 'pipeline-dot-active' : 'pipeline-dot-inactive'}"></div>
+                        <div class="pipeline-dot pipeline-dot-inactive"></div>
                         <div class="pipeline-label">5. Fuzzy Match:</div>
-                        <div class="pipeline-value">
-                            ${isFuzzy ? `${escapeHtml(reqPayload.fuzzy_scorer)} (Threshold: ${reqPayload.fuzzy_threshold}%, Top-K: ${reqPayload.fuzzy_top_k})` : 'SKIPPED (Exact hit)'}
-                        </div>
+                        <div class="pipeline-value" style="color: #9CA3AF;">DISABLED (Strict mode: 100% or Unknown)</div>
                     </div>
                     <div class="pipeline-step">
                         <div class="pipeline-dot pipeline-dot-active"></div>
-                        <div class="pipeline-label">6. Decision:</div>
-                        <div class="pipeline-value" style="color: #60A5FA; font-weight: 700;">
-                            ${escapeHtml(data.match_status)}${mgmtConclusion}
+                        <div class="pipeline-label">6. Kết luận:</div>
+                        <div class="pipeline-value" style="color: ${isMatched ? '#60A5FA' : '#F87171'}; font-weight: 700;">
+                            ${escapeHtml(data.status)} ${data.management ? `→ ${escapeHtml(data.management)}` : '→ Không có dữ liệu'}
                         </div>
                     </div>
                 </div>

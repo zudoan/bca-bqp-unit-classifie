@@ -46,18 +46,13 @@ async def stats(request: Request) -> StatsResponse:
 
 @router.post("/search", response_model=SearchResponse)
 async def search(body: SearchRequest, request: Request) -> dict[str, Any]:
-    """Run the full matching pipeline and return results."""
+    """Run the strict deterministic matching pipeline and return binary result."""
 
     from matching.repository import InMemoryOrganizationRepository
     from search.organization_search import OrganizationSearchService
 
-    # Build service with the requested fuzzy config ────────────────────────
     repo: InMemoryOrganizationRepository = request.app.state.repo
-    config = MatchingConfig(
-        fuzzy_scorer=body.fuzzy_scorer,
-        fuzzy_minimum_score=body.fuzzy_threshold,
-        fuzzy_top_k=body.fuzzy_top_k,
-    )
+    config = MatchingConfig(strict_mode=True)
     service = OrganizationSearchService(repo, config)
 
     result = service.search_organization(
@@ -67,17 +62,20 @@ async def search(body: SearchRequest, request: Request) -> dict[str, Any]:
         organization_type=body.organization_type,
     )
 
-    # Enrich candidates with management if present
-    if "candidates" in result and result["candidates"]:
-        for c in result["candidates"]:
-            org_id = c.get("organization_id")
-            if org_id:
-                try:
-                    c["management"] = repo.get_management(org_id)
-                except Exception:
-                    c["management"] = None
-
-    return result
+    is_match = bool(result.get("management"))
+    return {
+        "status": "MATCH_100" if is_match else "UNKNOWN",
+        "match_status": result.get("match_status", "UNKNOWN"),
+        "match_score": 100 if is_match else None,
+        "organization_id": result.get("organization_id"),
+        "organization_name": result.get("organization_name"),
+        "province_name": result.get("province_name"),
+        "organization_type_code": result.get("organization_type_code"),
+        "management": result.get("management"),
+        "message": None if is_match else "Không có dữ liệu cho đơn vị này trong hệ thống BCA / BQP.",
+        "reason": result.get("reason"),
+        "errors": result.get("errors"),
+    }
 
 
 # ── /api/normalize ───────────────────────────────────────────────────────────
