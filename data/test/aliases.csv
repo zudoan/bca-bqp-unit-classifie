@@ -1,0 +1,17 @@
+alias_id,organization_id,alias_name,normalized_alias,alias_search_key,alias_type
+1,BQP-DISTRICT-000196,BCHQS huyện Sóc Sơn,bchqs huyện sóc sơn,bchqs huyen soc son,ABBREVIATION
+2,BQP-DISTRICT-000210,Ban CHQS huyện Đông Anh,ban chqs huyện đông anh,ban chqs huyen dong anh,ABBREVIATION
+3,BQP-DISTRICT-000224,BCH Quân sự huyện Gia Lâm,bch quân sự huyện gia lâm,bch quan su huyen gia lam,ABBREVIATION
+4,BQP-DISTRICT-000266,BCHQS huyện Thanh Trì,bchqs huyện thanh trì,bchqs huyen thanh tri,ABBREVIATION
+5,BQP-DISTRICT-000280,Ban CHQS huyện Mê Linh,ban chqs huyện mê linh,ban chqs huyen me linh,ABBREVIATION
+6,BCA-DISTRICT-000195,CA huyện Sóc Sơn,ca huyện sóc sơn,ca huyen soc son,ABBREVIATION
+7,BCA-DISTRICT-000209,CAH Đông Anh,cah đông anh,cah dong anh,ABBREVIATION
+8,BCA-DISTRICT-000223,Công an H. Gia Lâm,công an h gia lâm,cong an h gia lam,SHORT_NAME
+9,BCA-DISTRICT-000265,CA huyện Thanh Trì,ca huyện thanh trì,ca huyen thanh tri,ABBREVIATION
+10,BCA-DISTRICT-000279,CAH Mê Linh,cah mê linh,cah me linh,ABBREVIATION
+11,BQP-DISTRICT-000322,BCHQS huyện Ba Vì,bchqs huyện ba vì,bchqs huyen ba vi,ABBREVIATION
+12,BQP-DISTRICT-000336,Ban CHQS huyện Phúc Thọ,ban chqs huyện phúc thọ,ban chqs huyen phuc tho,ABBREVIATION
+13,BQP-DISTRICT-000448,BCH Quân sự huyện Phú Xuyên,bch quân sự huyện phú xuyên,bch quan su huyen phu xuyen,ABBREVIATION
+14,BCA-DISTRICT-000335,CA huyện Phúc Thọ,ca huyện phúc thọ,ca huyen phuc tho,ABBREVIATION
+15,BCA-DISTRICT-000363,CAH Hoài Đức,cah hoài đức,cah hoai duc,ABBREVIATION
+16,BCA-DISTRICT-000419,Công an H. Thanh Oai,công an h thanh oai,cong an h thanh oai,SHORT_NAME

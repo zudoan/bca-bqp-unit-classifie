@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Hệ thống tra cứu tổ chức thuộc phạm vi quản lý BCA hoặc BQP. Nhập tên/mã tổ chức → Entity Resolution → Kết luận cơ quan chủ quản.">
+    <title>Tra cứu Tổ chức — BCA / BQP</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- Mobile sidebar toggle -->
+<button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">☰</button>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+<div class="app-layout">
+    <!-- ═══ Sidebar ═══════════════════════════════════════════════════════ -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <h3>🏛️ Organization Registry</h3>
+            <p>Hệ thống tra cứu BCA / BQP</p>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <div class="sidebar-section-title">⚙️ Cấu hình Matching Engine</div>
+
+        <label class="sidebar-label" for="cfgScorer">Thuật toán Fuzzy</label>
+        <select id="cfgScorer">
+            <option value="WRatio" selected>WRatio (khuyến nghị)</option>
+            <option value="ratio">ratio</option>
+            <option value="token_sort_ratio">token_sort_ratio</option>
+            <option value="token_set_ratio">token_set_ratio</option>
+        </select>
+
+        <div class="range-wrapper">
+            <label class="sidebar-label" for="cfgThreshold">Ngưỡng Fuzzy (cutoff)</label>
+            <input type="range" id="cfgThreshold" min="50" max="100" value="85" step="5">
+            <div class="range-value" id="cfgThresholdVal">85</div>
+        </div>
+
+        <div class="range-wrapper">
+            <label class="sidebar-label" for="cfgTopK">Số ứng viên tối đa (Top-K)</label>
+            <input type="range" id="cfgTopK" min="1" max="20" value="5" step="1">
+            <div class="range-value" id="cfgTopKVal">5</div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <div class="sidebar-section-title">📊 Thống kê Registry</div>
+        <div class="stat-grid" id="statGrid">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotal">—</div>
+                <div class="stat-label">Tổ chức</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statProvinces">—</div>
+                <div class="stat-label">Tỉnh/TP</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statBCA">—</div>
+                <div class="stat-label">BCA</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statBQP">—</div>
+                <div class="stat-label">BQP</div>
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            Version 1.0 • FastAPI + Matching Engine
+        </div>
+    </aside>
+
+    <!-- ═══ Main Content ══════════════════════════════════════════════════ -->
+    <main class="main-content">
+
+        <!-- Hero -->
+        <div class="hero">
+            <h1>Tra cứu Tổ chức BCA / BQP</h1>
+            <p>Nhập tên hoặc mã tổ chức → Entity Resolution → Tra cứu cơ quan chủ quản</p>
+        </div>
+
+        <!-- Search Form -->
+        <div class="glass-card" id="searchCard">
+            <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input
+                    type="text"
+                    class="search-input"
+                    id="orgNameInput"
+                    placeholder="Ví dụ: Công an tỉnh Thái Bình, Bộ CHQS tỉnh Quảng Ninh, ..."
+                    autocomplete="off"
+                >
+            </div>
+
+            <!-- Advanced filters toggle -->
+            <div class="advanced-toggle" id="advancedToggle">
+                <span class="chevron">▶</span>
+                <span>🔧 Tra cứu nâng cao</span>
+            </div>
+            <div class="advanced-filters" id="advancedFilters">
+                <div class="filter-group">
+                    <label for="orgIdInput">Mã tổ chức (ID)</label>
+                    <input type="text" id="orgIdInput" placeholder="VD: BCA-PROVINCE-002153">
+                </div>
+                <div class="filter-group">
+                    <label for="provinceSelect">Tỉnh / Thành phố</label>
+                    <select id="provinceSelect">
+                        <option value="">— Tất cả —</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="typeSelect">Loại tổ chức</label>
+                    <select id="typeSelect">
+                        <option value="">— Tất cả —</option>
+                    </select>
+                </div>
+            </div>
+
+            <button class="search-btn" id="searchBtn">🔍  Tra cứu</button>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Đang tìm kiếm...</p>
+        </div>
+
+        <!-- Results container -->
+        <div id="results"></div>
+
+        <!-- Empty state / Quick examples -->
+        <div id="emptyState">
+            <div class="glass-card empty-state">
+                <div class="icon">🔍</div>
+                <p>Nhập tên tổ chức vào ô bên trên và nhấn <strong style="color: #4F8BF9;">Tra cứu</strong> để bắt đầu.</p>
+                <p class="hint">Hệ thống hỗ trợ: có dấu, không dấu, viết tắt, lỗi chính tả nhẹ.</p>
+            </div>
+
+            <div class="examples-section">
+                <h4>💡 Thử nhanh</h4>
+                <div class="example-btns">
+                    <button class="example-btn" data-name="Công an tỉnh Thái Bình">📌 Công an tỉnh Thái Bình</button>
+                    <button class="example-btn" data-name="Bộ Chỉ huy Quân sự tỉnh Quảng Ninh">📌 Bộ CHQS tỉnh Quảng Ninh</button>
+                    <button class="example-btn" data-name="Cong an Thanh pho Ha Noi">📌 Cong an Thanh pho Ha Noi</button>
+                    <button class="example-btn" data-name="Đồn Biên phòng cửa khẩu Lào Cai">📌 Đồn BP cửa khẩu Lào Cai</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "organization-matching"
+version = "0.1.0"
+description = "Deterministic-first organization entity resolution and BCA/BQP registry lookup"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2,<4",
+  "psycopg[binary]>=3.2,<4",
+  "rapidfuzz>=3.10,<4",
+  "sqlalchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["preprocessing", "matching", "search", "evaluation"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+branch = true
+source = ["preprocessing", "matching", "search"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
