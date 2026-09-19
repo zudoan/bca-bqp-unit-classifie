@@ -696,4 +696,4 @@ with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP", css=CUSTOM_CSS, theme=gr
 
 
 if __name__ == "__main__":
-    demo.launch(ssr=False)
+    demo.launch()
