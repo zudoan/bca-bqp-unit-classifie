@@ -120,7 +120,8 @@ def search_organization_ui(org_name, org_id, province, org_type):
         organization_type=org_type,
     )
 
-    status = res.get("status", "UNKNOWN")
+    is_matched = bool(res.get("management"))
+    status = "MATCH_100" if is_matched else "UNKNOWN"
     match_status = res.get("match_status", "UNKNOWN")
     norm_val = normalize_name(org_name) if org_name else "—"
     search_key_val = to_search_key(org_name) if org_name else "—"
@@ -128,7 +129,7 @@ def search_organization_ui(org_name, org_id, province, org_type):
     html_out = ['<div class="result-container">']
 
     # ── CASE 1: MATCH_100 (ĐÚNG 100%) ──
-    if status == "MATCH_100":
+    if is_matched:
         mgmt = res.get("management", "N/A")
         is_bca = mgmt == "BCA"
         is_bqp = mgmt == "BQP"
