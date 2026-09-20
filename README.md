@@ -217,6 +217,14 @@ npm run dev
 
 Truy cập http://localhost:5173. Vite proxy `/api` và `/health` tới backend tại cổng `7860`.
 
+Khi frontend và backend chạy trên hai domain khác nhau, cấu hình domain được phép gọi API bằng biến môi trường backend:
+
+```text
+CORS_ORIGINS=https://bca-bqp-frontend.onrender.com
+```
+
+Có thể khai báo nhiều domain, phân tách bằng dấu phẩy. Không dùng `*` cho môi trường production.
+
 ### Gradio UI tùy chọn
 
 ```powershell

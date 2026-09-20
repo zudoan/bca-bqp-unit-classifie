@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import unittest
 
 import pandas as pd
@@ -9,6 +10,11 @@ from matching.repository import InMemoryOrganizationRepository
 from matching.resolver import MatchingConfig
 from preprocessing.normalize import normalize_name, to_search_key
 from search.organization_search import OrganizationSearchService
+
+os.environ["CORS_ORIGINS"] = "https://bca-bqp-frontend.onrender.com/"
+
+from api.main import app
+from fastapi.testclient import TestClient
 
 
 def make_organization(
@@ -36,6 +42,24 @@ def make_organization(
 
 
 class SearchPipelineTests(unittest.TestCase):
+    def test_render_frontend_cors_preflight(self) -> None:
+        client = TestClient(app)
+
+        response = client.options(
+            "/api/v1/organizations/search",
+            headers={
+                "Origin": "https://bca-bqp-frontend.onrender.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "https://bca-bqp-frontend.onrender.com",
+        )
+
     def test_payroll_and_management_are_independent(self) -> None:
         row = make_organization(
             "ORG-001",

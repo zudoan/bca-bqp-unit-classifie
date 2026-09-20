@@ -1,17 +1,19 @@
-"""FastAPI wrapper around the existing strict-deterministic search service.
+"""FastAPI wrapper around the organization search service.
 
 This file adds ZERO new matching logic. It only exposes
 search.organization_search.OrganizationSearchService as HTTP endpoints, so
-whatever guarantees the Gradio app already has (no fuzzy auto-assignment,
-UNKNOWN when unsure) apply here unchanged.
+the exact-first, conservative-fuzzy, and payroll-first guarantees apply here
+unchanged.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from matching.repository import InMemoryOrganizationRepository
@@ -39,6 +41,23 @@ app = FastAPI(
         "followed by payroll-first and BCA/BQP management lookup."
     ),
     version="1.0.0",
+)
+
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 
