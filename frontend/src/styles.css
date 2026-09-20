@@ -1264,7 +1264,8 @@ a:focus-visible {
   font-weight: 600;
 }
 
-.management-decision {
+.management-decision,
+.payroll-decision {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1274,14 +1275,16 @@ a:focus-visible {
   background: #f8fafb;
 }
 
-.management-decision > span {
+.management-decision > span,
+.payroll-decision > span {
   color: #6d7989;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
-.management-decision > strong {
+.management-decision > strong,
+.payroll-decision > strong {
   margin: 8px 0 2px;
   color: var(--blue);
   font-family: Georgia, serif;
@@ -1294,25 +1297,64 @@ a:focus-visible {
   color: var(--green);
 }
 
-.management-decision h3 {
+.management-decision h3,
+.payroll-decision h3 {
   margin: 3px 0 10px;
   color: #354356;
   font-size: 0.72rem;
   letter-spacing: 0.045em;
 }
 
-.management-decision i {
+.management-decision i,
+.payroll-decision i {
   width: 40px;
   height: 2px;
   margin-bottom: 10px;
   background: var(--red);
 }
 
-.management-decision small {
+.management-decision small,
+.payroll-decision small {
   max-width: 190px;
   color: #7d8795;
   font-size: 0.66rem;
   line-height: 1.45;
+}
+
+.decision-stack {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  background: #f8fafb;
+}
+
+.payroll-decision > strong {
+  max-width: 290px;
+  color: #9b1c31;
+  font-size: clamp(1.25rem, 2.4vw, 2rem);
+  letter-spacing: 0.02em;
+}
+
+.management-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+  background: #f1f4f7;
+}
+
+.management-secondary span {
+  color: #6d7989;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.management-secondary strong {
+  color: #29384b;
+  font-size: 0.72rem;
+  text-align: right;
 }
 
 .evidence-row {
@@ -1535,7 +1577,8 @@ a:focus-visible {
 .sheet-copy h2,
 .state-message h2,
 .identity-heading h2,
-.management-decision > strong {
+.management-decision > strong,
+.payroll-decision > strong {
   font-family: "Be Vietnam Pro", "Segoe UI", sans-serif;
 }
 
@@ -1610,7 +1653,8 @@ a:focus-visible {
     border-bottom: 1px solid var(--line-dark);
   }
 
-  .management-decision {
+  .management-decision,
+  .payroll-decision {
     min-height: 180px;
   }
 
@@ -1828,7 +1872,8 @@ a:focus-visible {
     grid-template-columns: 120px minmax(0, 1fr);
   }
 
-  .management-decision {
+  .management-decision,
+  .payroll-decision {
     min-height: 190px;
   }
 

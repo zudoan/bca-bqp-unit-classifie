@@ -18,6 +18,8 @@ const mockOrganizations: SearchResponse[] = [
     organization_name: "Công an tỉnh Thái Bình",
     province_name: "Thái Bình",
     organization_type_code: "POLICE_PROVINCE",
+    paying_organization: "BCA",
+    payroll_status: "Do BCA trả lương",
     management: "BCA",
   },
   {
@@ -27,6 +29,8 @@ const mockOrganizations: SearchResponse[] = [
     organization_name: "Bộ Chỉ huy Quân sự tỉnh Quảng Ninh",
     province_name: "Quảng Ninh",
     organization_type_code: "MILITARY_PROVINCE",
+    paying_organization: "BQP",
+    payroll_status: "Do BQP trả lương",
     management: "BQP",
   },
   {
@@ -36,6 +40,8 @@ const mockOrganizations: SearchResponse[] = [
     organization_name: "Học viện Cảnh sát nhân dân",
     province_name: "Hà Nội",
     organization_type_code: "MINISTRY_DEPARTMENT",
+    paying_organization: "BCA",
+    payroll_status: "Do BCA trả lương",
     management: "BCA",
   },
   {
@@ -45,6 +51,8 @@ const mockOrganizations: SearchResponse[] = [
     organization_name: "Học viện Kỹ thuật Quân sự",
     province_name: "Hà Nội",
     organization_type_code: "ACADEMY",
+    paying_organization: "BQP",
+    payroll_status: "Do BQP trả lương",
     management: "BQP",
   },
   {
@@ -54,6 +62,8 @@ const mockOrganizations: SearchResponse[] = [
     organization_name: "Ban Chỉ huy Quân sự huyện Sóc Sơn",
     province_name: "Hà Nội",
     organization_type_code: "MILITARY_DISTRICT",
+    paying_organization: "UBND Địa phương",
+    payroll_status: "Không do BCA/BQP trả lương",
     management: "BQP",
   },
 ];

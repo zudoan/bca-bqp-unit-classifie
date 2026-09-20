@@ -6,6 +6,8 @@ export type MatchStatus =
   | "NORMALIZED_MATCH"
   | "SEARCH_KEY_MATCH"
   | "ALIAS_MATCH"
+  | "FUZZY_MATCH"
+  | "FUZZY_CANDIDATES"
   | "AMBIGUOUS_MATCH"
   | "NOT_FOUND"
   | "INVALID_INPUT";
@@ -35,6 +37,8 @@ export interface SearchResponse {
   organization_name?: string;
   province_name?: string | null;
   organization_type_code?: string;
+  paying_organization?: string | null;
+  payroll_status?: string;
   management?: Management;
   candidates?: OrganizationCandidate[];
   reason?: string;

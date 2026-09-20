@@ -9,7 +9,7 @@ services:
       - "7860:7860"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=5).read()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -18,7 +18,7 @@ services:
   # Frontend React + Nginx
   frontend:
     build:
-      context: ./frontend-bca-bqp-handoff/frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: bca-bqp-frontend
     ports:
@@ -27,7 +27,7 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80"]
       interval: 30s
       timeout: 10s
       retries: 3

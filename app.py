@@ -1,6 +1,6 @@
 """Hugging Face Spaces Application — Organization Matching Registry (BCA / BQP).
 
-Strict Deterministic Binary Search (100% Match or UNKNOWN).
+Exact-first entity resolution with conservative fuzzy fallback.
 Native ZeroGPU & Hugging Face Spaces compatibility.
 """
 
@@ -69,6 +69,8 @@ STATUS_INFO = {
     "NORMALIZED_MATCH": "Khớp tên sau chuẩn hóa",
     "SEARCH_KEY_MATCH": "Khớp không dấu (Search Key)",
     "ALIAS_MATCH": "Khớp tên viết tắt / Tên gọi khác",
+    "FUZZY_MATCH": "Khớp gần đúng có độ tin cậy cao",
+    "FUZZY_CANDIDATES": "Ứng viên gần đúng cần xác nhận",
     "RESOLVED": "Khớp chính xác",
     "NOT_FOUND": "Không có dữ liệu",
     "INVALID_INPUT": "Dữ liệu không hợp lệ",
@@ -91,7 +93,7 @@ def _gpu_decorator(func):
     return func
 
 
-# ── 2. Strict Binary Search Logic ─────────────────────────────────────────────
+# ── 2. Exact-first + conservative fuzzy search ───────────────────────────────
 
 @_gpu_decorator
 def search_organization_ui(org_name, org_id, province, org_type):
@@ -109,8 +111,7 @@ def search_organization_ui(org_name, org_id, province, org_type):
         </div>
         """
 
-    # Strict deterministic service (no fuzzy guessing, no candidates)
-    config = MatchingConfig(strict_mode=True)
+    config = MatchingConfig()
     service = OrganizationSearchService(repo, config)
 
     res = service.search_organization(
@@ -120,15 +121,15 @@ def search_organization_ui(org_name, org_id, province, org_type):
         organization_type=org_type,
     )
 
-    is_matched = bool(res.get("management"))
-    status = "MATCH_100" if is_matched else "UNKNOWN"
+    is_matched = bool(res.get("organization_id") and res.get("management"))
+    status = "RESOLVED" if is_matched else "UNKNOWN"
     match_status = res.get("match_status", "UNKNOWN")
     norm_val = normalize_name(org_name) if org_name else "—"
     search_key_val = to_search_key(org_name) if org_name else "—"
 
     html_out = ['<div class="result-container">']
 
-    # ── CASE 1: MATCH_100 (ĐÚNG 100%) ──
+    # ── CASE 1: RESOLVED ──
     if is_matched:
         mgmt = res.get("management", "N/A")
         is_bca = mgmt == "BCA"
@@ -138,15 +139,18 @@ def search_organization_ui(org_name, org_id, province, org_type):
         info_label = STATUS_INFO.get(match_status, match_status)
         type_code = res.get("organization_type_code", "")
         type_label = TYPE_CODE_LABELS.get(type_code, type_code or "—")
+        paying_organization = res.get("paying_organization") or "Chưa xác định cụ thể"
+        payroll_status = res.get("payroll_status") or "Chưa có trạng thái trả lương"
+        confidence_label = "100%" if match_status != "FUZZY_MATCH" else f"{res.get('match_score', 0)}%"
 
         html_out.append(f"""
         <div class="result-card">
             <div class="badge-header">
-                <div class="badge-subtitle">KẾT LUẬN CƠ QUAN QUẢN LÝ</div>
-                <div class="{badge_cls}">{html.escape(mgmt)}</div>
-                <div class="badge-label">{html.escape(mgmt_name)}</div>
+                <div class="badge-subtitle">KẾT LUẬN ƯU TIÊN · ĐƠN VỊ TRẢ LƯƠNG</div>
+                <div class="{badge_cls}" style="font-size: 1.45rem;">{html.escape(paying_organization)}</div>
+                <div class="badge-label">{html.escape(payroll_status)}</div>
                 <div style="margin-top: 10px;">
-                    <span class="status-chip chip-resolved">✅ ĐÚNG 100% — {html.escape(info_label)}</span>
+                    <span class="status-chip chip-resolved">✅ ĐÃ PHÂN GIẢI ({html.escape(confidence_label)}) — {html.escape(info_label)}</span>
                 </div>
             </div>
 
@@ -169,6 +173,14 @@ def search_organization_ui(org_name, org_id, province, org_type):
                     <span class="info-v">{html.escape(type_label)} <code class="type-code">({html.escape(type_code)})</code></span>
                 </div>
                 <div class="info-row">
+                    <span class="info-k">Đơn vị trả lương</span>
+                    <span class="info-v bold">{html.escape(paying_organization)}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-k">Trạng thái trả lương</span>
+                    <span class="info-v">{html.escape(payroll_status)}</span>
+                </div>
+                <div class="info-row">
                     <span class="info-k">Cơ quan chủ quản</span>
                     <span class="info-v" style="color: {'#60A5FA' if is_bca else '#34D399'}; font-weight: 700;">
                         {html.escape(mgmt)} — {html.escape(mgmt_name)}
@@ -178,29 +190,41 @@ def search_organization_ui(org_name, org_id, province, org_type):
         </div>
         """)
 
-    # ── CASE 2: UNKNOWN (KHÔNG CÓ DỮ LIỆU) ──
+    # ── CASE 2: REVIEW / UNKNOWN ──
     else:
+        candidates = res.get("candidates") or []
+        candidate_rows = "".join(
+            f"<li><strong>{html.escape(item.get('organization_name') or '—')}</strong> "
+            f"({html.escape(item.get('organization_id') or '—')}) — "
+            f"{html.escape(item.get('province_name') or '—')} — "
+            f"{html.escape(str(item.get('score') or '—'))}%</li>"
+            for item in candidates
+        )
+        review_message = (
+            f"<div class='banner banner-warn'><strong>Cần xác nhận ứng viên fuzzy:</strong>"
+            f"<ul>{candidate_rows}</ul>Hãy nhập mã tổ chức hoặc bổ sung tỉnh/loại tổ chức.</div>"
+            if candidates
+            else "<div class='banner banner-danger'><strong>Không có dữ liệu đủ tin cậy.</strong> Kiểm tra lại tên/mã tổ chức.</div>"
+        )
         html_out.append(f"""
         <div class="result-card">
             <div style="text-align: center; margin-bottom: 12px;">
-                <span class="status-chip chip-notfound">❌ UNKNOWN (Không có dữ liệu)</span>
+                <span class="status-chip chip-notfound">⚠️ CHƯA THỂ KẾT LUẬN</span>
             </div>
-            <div class="banner banner-danger">
-                ❌ <strong>Không có dữ liệu cho đơn vị này:</strong> Hệ thống không tìm thấy tổ chức nào khớp chính xác 100% trong cơ sở dữ liệu BCA / BQP.
-            </div>
+            {review_message}
             <div style="font-size: 13px; color: #9CA3AF; margin-top: 10px; line-height: 1.6;">
-                💡 <strong>Nguyên tắc tìm kiếm (Strict Deterministic):</strong>
+                💡 <strong>Nguyên tắc tìm kiếm an toàn:</strong>
                 <ul style="margin-left: 20px;">
-                    <li>Hệ thống chỉ kết luận khi khớp chính xác 100% (qua Tên, Mã ID, Tên không dấu hoặc Tên viết tắt).</li>
-                    <li>Tuyệt đối không phỏng đoán hay đưa ra ứng viên xấp xỉ nhằm đảm bảo tính an toàn dữ liệu.</li>
-                    <li>Vui lòng kiểm tra lại chính tả hoặc mở "Tra cứu nâng cao" để nhập trực tiếp mã tổ chức (nếu có).</li>
+                    <li>Ưu tiên ID, tên chính xác, tên chuẩn hóa và alias trước fuzzy.</li>
+                    <li>Fuzzy chỉ tự kết luận khi điểm cao và cách biệt rõ với ứng viên thứ hai.</li>
+                    <li>Không hiển thị dữ liệu trả lương/quản lý khi thực thể chưa được xác nhận duy nhất.</li>
                 </ul>
             </div>
         </div>
         """)
 
     # ── PIPELINE TRACE ──
-    is_matched = status == "MATCH_100"
+    is_matched = status == "RESOLVED"
     decision_text = f"{status}"
     if res.get("management"):
         decision_text += f" → {res.get('management')}"
@@ -227,13 +251,13 @@ def search_organization_ui(org_name, org_id, province, org_type):
         </div>
         <div class="trace-step">
             <div class="trace-dot {'active' if is_matched else 'inactive'}"></div>
-            <div class="trace-k">4. Strict Match:</div>
-            <div class="trace-v mono">{'HIT (100% - ' + html.escape(match_status) + ')' if is_matched else 'MISS (No exact match)'}</div>
+            <div class="trace-k">4. Entity Match:</div>
+            <div class="trace-v mono">{'HIT (' + html.escape(match_status) + ')' if is_matched else html.escape(match_status)}</div>
         </div>
         <div class="trace-step">
-            <div class="trace-dot inactive"></div>
+            <div class="trace-dot {'active' if match_status in {'FUZZY_MATCH', 'FUZZY_CANDIDATES'} else 'inactive'}"></div>
             <div class="trace-k">5. Fuzzy Match:</div>
-            <div class="trace-v mono" style="color: #9CA3AF;">DISABLED (Strict Mode: 100% or Unknown)</div>
+            <div class="trace-v mono" style="color: #9CA3AF;">{'USED' if match_status in {'FUZZY_MATCH', 'FUZZY_CANDIDATES'} else 'NOT NEEDED'}</div>
         </div>
         <div class="trace-step">
             <div class="trace-dot active"></div>
@@ -413,14 +437,14 @@ body, .gradio-container {
 .trace-v.bold { font-weight: 700; }
 """
 
-with gr.Blocks(title="Tra cứu Tổ chức BCA / BQP (Strict Mode)", css=CUSTOM_CSS, theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate")) as demo:
+with gr.Blocks(title="Tra cứu trả lương & quản lý BCA / BQP", css=CUSTOM_CSS, theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate")) as demo:
     gr.HTML("""
     <div style="text-align: center; padding: 16px 0 10px;">
         <h1 style="font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, #4F8BF9, #7C3AED, #EC4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
             🏛️ Tra cứu Tổ chức — BCA / BQP
         </h1>
         <p style="color: #9CA3AF; font-size: 14px; margin-top: 4px;">
-            Hệ thống Strict Deterministic Search: Đúng 100% hoặc Unknown (Không phỏng đoán mờ)
+            Exact-first + Fuzzy có ngưỡng an toàn · Ưu tiên kết luận đơn vị trả lương
         </p>
     </div>
     """)

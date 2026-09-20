@@ -1,4 +1,4 @@
-"""Public search facade: entity resolution followed by management lookup."""
+"""Public search facade: entity resolution, payroll, then management lookup."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from matching.resolver import MatchingConfig, OrganizationResolver
 from preprocessing.validate import InputValidationError, validate_search_input
 
 from .management_lookup import RegistryDataError, lookup_management
+from .payroll_lookup import lookup_payroll
 
 
 class OrganizationSearchService:
@@ -54,8 +55,11 @@ class OrganizationSearchService:
             organization = resolution.organization
             if organization is None:  # Defensive assertion for custom resolvers.
                 raise RegistryDataError("resolved match has no organization")
-            # This is intentionally the only management lookup in the pipeline,
-            # and it occurs only after canonical organization resolution.
+            # Outcome fields are looked up only after canonical resolution and
+            # never participate in exact or fuzzy entity matching.
+            payroll = lookup_payroll(
+                self.repository, organization.organization_id
+            )
             management = lookup_management(
                 self.repository, organization.organization_id
             )
@@ -66,6 +70,8 @@ class OrganizationSearchService:
                 "organization_name": organization.organization_name,
                 "province_name": organization.province_name,
                 "organization_type_code": organization.organization_type_code,
+                "paying_organization": payroll.paying_organization,
+                "payroll_status": payroll.payroll_status,
                 "management": management,
             }
 
@@ -79,6 +85,7 @@ class OrganizationSearchService:
             ]
         elif resolution.match_status in {
             MatchStatus.AMBIGUOUS_MATCH,
+            MatchStatus.FUZZY_CANDIDATES,
             MatchStatus.NOT_FOUND,
         }:
             result["candidates"] = []

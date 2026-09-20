@@ -3,7 +3,7 @@ echo 🚀 Starting BCA-BQP Application Stack...
 echo.
 
 REM Build and start all services
-docker-compose up -d --build
+docker compose up -d --build
 
 echo.
 echo ✅ Services starting...
@@ -14,8 +14,8 @@ echo    - API Docs:   http://localhost:7860/docs
 echo.
 echo 🎨 Frontend:     http://localhost:3000
 echo.
-echo 📝 View logs:    docker-compose logs -f
-echo 🛑 Stop:         docker-compose down
+echo 📝 View logs:    docker compose logs -f
+echo 🛑 Stop:         docker compose down
 echo.
 
 pause

@@ -30,11 +30,14 @@ aliases = (
     else []
 )
 repo = InMemoryOrganizationRepository(rows, aliases)
-service = OrganizationSearchService(repo, MatchingConfig(strict_mode=True))
+service = OrganizationSearchService(repo, MatchingConfig())
 
 app = FastAPI(
     title="BCA/BQP Organization Registry API",
-    description="Strict Deterministic Entity Resolution — 100% match or UNKNOWN, never a guess.",
+    description=(
+        "Exact-first organization resolution with conservative fuzzy fallback, "
+        "followed by payroll-first and BCA/BQP management lookup."
+    ),
     version="1.0.0",
 )
 
@@ -82,10 +85,13 @@ def get_by_id(organization_id: str):
     if organization is None:
         raise HTTPException(status_code=404, detail="ORGANIZATION_ID_NOT_FOUND")
     management = repo.get_management(organization_id)
+    payroll = repo.get_payroll(organization_id)
     return {
         "organization_id": organization.organization_id,
         "organization_name": organization.organization_name,
         "province_name": organization.province_name,
         "organization_type_code": organization.organization_type_code,
+        "paying_organization": payroll.paying_organization if payroll else None,
+        "payroll_status": payroll.payroll_status if payroll else None,
         "management": management,
     }

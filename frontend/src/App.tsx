@@ -55,6 +55,8 @@ const STATUS_LABELS: Record<string, string> = {
   NORMALIZED_MATCH: "Khớp tên sau chuẩn hóa",
   SEARCH_KEY_MATCH: "Khớp khóa tìm kiếm không dấu",
   ALIAS_MATCH: "Khớp tên viết tắt / tên gọi khác",
+  FUZZY_MATCH: "Khớp gần đúng có độ tin cậy cao",
+  FUZZY_CANDIDATES: "Các ứng viên gần đúng cần xác nhận",
   AMBIGUOUS_MATCH: "Nhiều tổ chức cùng thỏa điều kiện",
   NOT_FOUND: "Không tìm thấy kết quả",
   INVALID_INPUT: "Dữ liệu đầu vào chưa hợp lệ",
@@ -185,14 +187,8 @@ function App() {
         <main className="workspace-main">
           <section className="page-heading">
             <div>
-              <span className="section-code">ORG RESOLUTION · V1</span>
+              <span className="section-code">ORG RESOLUTION</span>
               <h1>Tra cứu và định danh tổ chức</h1>
-              <p>Đối chiếu tên đơn vị với Master Registry trước khi xác định cơ quan quản lý BCA hoặc BQP.</p>
-            </div>
-            <div className="policy-mark">
-              <span>Nguyên tắc kết luận</span>
-              <strong>Khớp tuyệt đối</strong>
-              <small>Không sử dụng suy đoán gần đúng</small>
             </div>
           </section>
 
@@ -230,7 +226,7 @@ function App() {
 
         <footer className="portal-footer">
           <span>Hệ thống tra cứu tổ chức BCA / BQP</span>
-          <span>Nguồn đối chiếu: Master Registry · Chế độ Strict Deterministic</span>
+          <span>Nguồn đối chiếu: Master Registry · Exact + Conservative Fuzzy</span>
         </footer>
       </div>
     </div>
@@ -270,7 +266,7 @@ function Sidebar({ stats }: { stats: RegistryStats }) {
 
       <div className="sidebar-footer">
         <span className="runtime-dot" />
-        <div><strong>Strict mode</strong><small>Fuzzy matching: OFF</small></div>
+        <div><strong>Safe matching</strong><small>Exact ưu tiên · Fuzzy có ngưỡng</small></div>
       </div>
     </aside>
   );
@@ -350,8 +346,6 @@ function SearchPanel(props: SearchPanelProps) {
           </div>
         </div>
 
-        <div className="query-policy"><GoogleIcon name="verified_user" size={20} /><p><strong>Chế độ xác định tuyệt đối.</strong> Nếu nhiều bản ghi cùng khớp, hệ thống yêu cầu thêm ngữ cảnh thay vì tự chọn một kết quả.</p></div>
-
         <div className="form-actions">
           <button className="primary-action" type="submit" disabled={loading}>
             {loading ? <span className="spinner" /> : <GoogleIcon name="search" size={20} />}
@@ -424,22 +418,23 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
         <OutputCaption status="---" title="Kết quả định danh" />
         <div className="initial-sheet">
           <span className="sheet-mark">BCA / BQP</span>
-          <div className="sheet-copy"><span className="section-code">AWAITING QUERY</span><h2>Chưa có yêu cầu tra cứu</h2><p>Nhập tên hoặc mã tổ chức tại biểu mẫu bên trái. Phiếu kết quả sẽ thể hiện đầy đủ căn cứ định danh và cơ quan quản lý.</p></div>
+          <div className="sheet-copy"><span className="section-code">AWAITING QUERY</span><h2>Chưa có yêu cầu tra cứu</h2><p>Nhập tên hoặc mã tổ chức tại biểu mẫu bên trái. Phiếu kết quả ưu tiên kết luận đơn vị trả lương, sau đó hiển thị cơ quan quản lý.</p></div>
           <ol className="comparison-rules">
             <li><span>01</span><div><strong>Đối chiếu định danh</strong><small>ID, tên chính thức, tên chuẩn hóa và alias</small></div></li>
             <li><span>02</span><div><strong>Kiểm tra ngữ cảnh</strong><small>Địa phương và loại hình tổ chức</small></div></li>
-            <li><span>03</span><div><strong>Tra cứu quản lý</strong><small>Chỉ thực hiện sau khi đã xác định duy nhất</small></div></li>
+            <li><span>03</span><div><strong>Tra cứu kết luận</strong><small>Đơn vị trả lương trước, phạm vi quản lý sau</small></div></li>
           </ol>
         </div>
       </section>
     );
   }
 
-  if (result.match_status === "AMBIGUOUS_MATCH") {
+  if (result.match_status === "AMBIGUOUS_MATCH" || result.match_status === "FUZZY_CANDIDATES") {
+    const isFuzzyReview = result.match_status === "FUZZY_CANDIDATES";
     return (
       <section className="desk-panel output-panel ambiguous-output">
         <OutputCaption status="REV" title="Kết quả cần rà soát" />
-        <div className="output-alert warning-alert"><GoogleIcon name="warning" size={23} filled /><div><strong>Chưa thể kết luận cơ quan quản lý</strong><span>{result.candidates?.length || 0} bản ghi có cùng tên. Chọn đúng địa phương hoặc bổ sung bộ lọc.</span></div></div>
+        <div className="output-alert warning-alert"><GoogleIcon name="warning" size={23} filled /><div><strong>Chưa thể kết luận đơn vị trả lương và cơ quan quản lý</strong><span>{isFuzzyReview ? `${result.candidates?.length || 0} ứng viên gần đúng được tìm thấy. Hãy chọn đúng tổ chức.` : `${result.candidates?.length || 0} bản ghi có cùng tên. Chọn đúng địa phương hoặc bổ sung bộ lọc.`}</span></div></div>
         <div className="candidate-table" role="list">
           <div className="candidate-table-head"><span>Tổ chức</span><span>Địa phương</span><span>Mã định danh</span><span /></div>
           {result.candidates?.map((candidate) => (
@@ -460,13 +455,15 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
     return (
       <section className="desk-panel output-panel state-output not-found-output">
         <OutputCaption status="N/A" title="Kết quả định danh" />
-        <div className="state-message"><span><GoogleIcon name="search_off" size={29} /></span><div><small>{invalid ? "INVALID INPUT" : "NO DETERMINISTIC MATCH"}</small><h2>{invalid ? "Yêu cầu tra cứu chưa hợp lệ" : "Không tìm thấy bản ghi khớp tuyệt đối"}</h2><p>{invalid ? result.errors?.join(" ") : result.reason === "DETERMINISTIC_MATCH_CONTEXT_MISMATCH" ? "Tên tổ chức tồn tại nhưng mâu thuẫn với địa phương hoặc loại tổ chức đã chọn." : `Master Registry không có bản ghi chính xác cho “${request?.organization_name || request?.organization_id || "truy vấn này"}”.`}</p><strong className="unknown-label">KẾT LUẬN: UNKNOWN</strong></div></div>
+        <div className="state-message"><span><GoogleIcon name="search_off" size={29} /></span><div><small>{invalid ? "INVALID INPUT" : "NO SAFE MATCH"}</small><h2>{invalid ? "Yêu cầu tra cứu chưa hợp lệ" : "Không tìm thấy bản ghi đủ tin cậy"}</h2><p>{invalid ? result.errors?.join(" ") : result.reason === "DETERMINISTIC_MATCH_CONTEXT_MISMATCH" ? "Tên tổ chức tồn tại nhưng mâu thuẫn với địa phương hoặc loại tổ chức đã chọn." : `Master Registry không có bản ghi Exact/Fuzzy đủ an toàn cho “${request?.organization_name || request?.organization_id || "truy vấn này"}”.`}</p><strong className="unknown-label">KẾT LUẬN: UNKNOWN</strong></div></div>
       </section>
     );
   }
 
   const isBca = result.management === "BCA";
   const managementName = isBca ? "BỘ CÔNG AN" : "BỘ QUỐC PHÒNG";
+  const payingOrganization = result.paying_organization || "CHƯA XÁC ĐỊNH CỤ THỂ";
+  const usedFuzzy = result.match_status === "FUZZY_MATCH";
 
   return (
     <section className={`desk-panel output-panel resolved-output ${isBca ? "result-bca" : "result-bqp"}`}>
@@ -487,19 +484,18 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
           <div><dt>Phương thức khớp</dt><dd>{STATUS_LABELS[result.match_status]}</dd></div>
         </dl>
 
-        <div className="management-decision">
-          <span>KẾT LUẬN CƠ QUAN QUẢN LÝ</span>
-          <strong>{result.management}</strong>
-          <h3>{managementName}</h3>
-          <i />
-          <small>Tra cứu trực tiếp từ Master Registry sau khi hoàn tất định danh thực thể.</small>
+        <div className="decision-stack">
+          <div className="payroll-decision">
+            <span>KẾT LUẬN</span>
+            <strong>{payingOrganization}</strong>
+            <h3>{result.payroll_status || "Chưa có trạng thái trả lương"}</h3>
+            <i />
+          </div>
+          <div className="management-secondary">
+            <span>PHẠM VI QUẢN LÝ</span>
+            <strong>{result.management} · {managementName}</strong>
+          </div>
         </div>
-      </div>
-
-      <div className="evidence-row">
-        <div><span>Trạng thái hồ sơ</span><strong><GoogleIcon name="check_circle" size={16} filled /> Đã phân giải</strong></div>
-        <div><span>Điểm đối chiếu</span><strong>{result.match_score || 100} / 100</strong></div>
-        <div><span>Fuzzy matching</span><strong>Không sử dụng</strong></div>
       </div>
     </section>
   );
@@ -524,20 +520,21 @@ function LoadingResult() {
 function PipelinePanel({ result, loading, request }: { result: SearchResponse | null; loading: boolean; request: SearchRequest | null }) {
   const query = request?.organization_name || request?.organization_id || "";
   const isResolved = Boolean(result?.management);
-  const isAmbiguous = result?.match_status === "AMBIGUOUS_MATCH";
+  const isAmbiguous = result?.match_status === "AMBIGUOUS_MATCH" || result?.match_status === "FUZZY_CANDIDATES";
   const finished = Boolean(result);
 
   const steps = useMemo(() => [
     { code: "IN", title: "Tiếp nhận truy vấn", value: query || "Chưa có dữ liệu", state: request ? "done" : "idle" },
     { code: "NM", title: "Chuẩn hóa tên", value: request ? normalizePreview(query) || "Bỏ qua khi tra bằng ID" : "—", state: request ? "done" : "idle" },
     { code: "SK", title: "Sinh khóa tìm kiếm", value: request ? searchKeyPreview(query) || "Tra cứu khóa ID" : "—", state: request ? "done" : "idle" },
-    { code: "ER", title: "Phân giải thực thể", value: loading ? "Đang đối chiếu" : isResolved ? STATUS_LABELS[result!.match_status] : isAmbiguous ? "Yêu cầu bổ sung ngữ cảnh" : finished ? "Không có khớp tuyệt đối" : "—", state: loading ? "active" : isResolved ? "done" : finished ? "failed" : "idle" },
+    { code: "ER", title: "Phân giải thực thể", value: loading ? "Đang đối chiếu" : isResolved ? STATUS_LABELS[result!.match_status] : isAmbiguous ? "Yêu cầu xác nhận ứng viên" : finished ? "Không có khớp đủ an toàn" : "—", state: loading ? "active" : isResolved ? "done" : finished ? "failed" : "idle" },
+    { code: "PR", title: "Tra cứu trả lương", value: isResolved ? `${result!.paying_organization || "Chưa xác định cụ thể"} · ${result!.payroll_status || "Chưa có trạng thái"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
     { code: "MG", title: "Tra cứu quản lý", value: isResolved ? `${result!.management} · ${result!.management === "BCA" ? "Bộ Công an" : "Bộ Quốc phòng"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
   ], [finished, isAmbiguous, isResolved, loading, query, request, result]);
 
   return (
     <section className="desk-panel audit-panel">
-      <div className="audit-heading"><div><span className="section-code">PROCESS AUDIT</span><h2>Dấu vết xử lý</h2></div><span>05 GIAI ĐOẠN</span></div>
+      <div className="audit-heading"><div><span className="section-code">PROCESS AUDIT</span><h2>Dấu vết xử lý</h2></div><span>06 GIAI ĐOẠN</span></div>
       <div className="audit-track">
         {steps.map((step, index) => (
           <div className={`audit-step is-${step.state}`} key={step.code}>

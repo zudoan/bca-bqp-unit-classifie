@@ -13,7 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from preprocessing.normalize import normalize_name, to_search_key
 
-from .models import AliasRecord, OrganizationRecord
+from .models import AliasRecord, OrganizationRecord, PayrollInfo
 
 
 @runtime_checkable
@@ -42,6 +42,8 @@ class OrganizationRepository(Protocol):
 
     def get_management(self, organization_id: str) -> str | None: ...
 
+    def get_payroll(self, organization_id: str) -> PayrollInfo | None: ...
+
 
 class InMemoryOrganizationRepository:
     """Small deterministic repository for tests and local experimentation."""
@@ -55,6 +57,7 @@ class InMemoryOrganizationRepository:
         self._organizations: list[OrganizationRecord] = []
         self._by_id: dict[str, OrganizationRecord] = {}
         self._management_by_id: dict[str, str] = dict(management_by_id or {})
+        self._payroll_by_id: dict[str, PayrollInfo] = {}
         self._by_name: dict[str, list[OrganizationRecord]] = defaultdict(list)
         self._by_normalized: dict[str, list[OrganizationRecord]] = defaultdict(list)
         self._by_search_key: dict[str, list[OrganizationRecord]] = defaultdict(list)
@@ -78,6 +81,20 @@ class InMemoryOrganizationRepository:
                 self._management_by_id[organization.organization_id] = str(
                     source["management"]
                 )
+            if isinstance(source, Mapping) and (
+                "co_quan_tra_luong" in source or "trang_thai_tra_luong" in source
+            ):
+                paying_organization = _optional_registry_string(
+                    source.get("co_quan_tra_luong")
+                )
+                payroll_status = _optional_registry_string(
+                    source.get("trang_thai_tra_luong")
+                )
+                if payroll_status is not None:
+                    self._payroll_by_id[organization.organization_id] = PayrollInfo(
+                        paying_organization=paying_organization,
+                        payroll_status=payroll_status,
+                    )
 
         self._aliases: list[AliasRecord] = []
         self._alias_by_normalized: dict[str, set[str]] = defaultdict(set)
@@ -150,6 +167,9 @@ class InMemoryOrganizationRepository:
 
     def get_management(self, organization_id: str) -> str | None:
         return self._management_by_id.get(organization_id)
+
+    def get_payroll(self, organization_id: str) -> PayrollInfo | None:
+        return self._payroll_by_id.get(organization_id)
 
 
 class SqlAlchemyOrganizationRepository:
@@ -341,3 +361,33 @@ class SqlAlchemyOrganizationRepository:
         with self.engine.connect() as connection:
             value = connection.execute(statement).scalar_one_or_none()
         return str(value) if value is not None else None
+
+    def get_payroll(self, organization_id: str) -> PayrollInfo | None:
+        if "co_quan_tra_luong" not in self.organizations.c:
+            return None
+        if "trang_thai_tra_luong" not in self.organizations.c:
+            return None
+        from sqlalchemy import select
+
+        statement = select(
+            self.organizations.c.co_quan_tra_luong,
+            self.organizations.c.trang_thai_tra_luong,
+        ).where(self.organizations.c.organization_id == organization_id)
+        with self.engine.connect() as connection:
+            row = connection.execute(statement).first()
+        if row is None:
+            return None
+        payroll_status = _optional_registry_string(row.trang_thai_tra_luong)
+        if payroll_status is None:
+            return None
+        return PayrollInfo(
+            paying_organization=_optional_registry_string(row.co_quan_tra_luong),
+            payroll_status=payroll_status,
+        )
+
+
+def _optional_registry_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

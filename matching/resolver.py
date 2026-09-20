@@ -1,4 +1,4 @@
-"""Resolver orchestration for strict deterministic entity matching."""
+"""Resolver orchestration for exact-first matching with fuzzy fallback."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from preprocessing.validate import SearchInput
 
 from .alias_match import AliasMatcher
 from .exact_match import ExactMatcher
+from .fuzzy_match import FuzzyMatcher
 from .models import (
     MatchCandidate,
     MatchResolution,
@@ -21,7 +22,12 @@ from .repository import OrganizationRepository
 
 @dataclass(frozen=True, slots=True)
 class MatchingConfig:
-    strict_mode: bool = True
+    strict_mode: bool = False
+    enable_fuzzy: bool = True
+    fuzzy_auto_resolve_threshold: float = 93.0
+    fuzzy_candidate_threshold: float = 75.0
+    fuzzy_min_score_gap: float = 5.0
+    fuzzy_candidate_limit: int = 5
 
 
 class OrganizationResolver:
@@ -36,9 +42,10 @@ class OrganizationResolver:
         self.config = config or MatchingConfig()
         self.exact_matcher = ExactMatcher(repository)
         self.alias_matcher = AliasMatcher(repository)
+        self.fuzzy_matcher = FuzzyMatcher(repository)
 
     def resolve(self, request: SearchInput) -> MatchResolution:
-        """Run ID -> name -> normalized -> key -> alias stages (Strict Deterministic)."""
+        """Run deterministic stages first, then conservative fuzzy retrieval."""
 
         if request.organization_id:
             organization = self.exact_matcher.match_id(request.organization_id)
@@ -71,9 +78,40 @@ class OrganizationResolver:
                 request,
             )
 
+        if self.config.enable_fuzzy and not self.config.strict_mode:
+            fuzzy_candidates = self.fuzzy_matcher.match(
+                request.organization_name,
+                province_name=request.province_name,
+                organization_type_code=request.organization_type,
+                candidate_threshold=self.config.fuzzy_candidate_threshold,
+                limit=self.config.fuzzy_candidate_limit,
+            )
+            if fuzzy_candidates:
+                top = fuzzy_candidates[0]
+                runner_up_score = (
+                    fuzzy_candidates[1].score
+                    if len(fuzzy_candidates) > 1
+                    else 0.0
+                )
+                if (
+                    top.score >= self.config.fuzzy_auto_resolve_threshold
+                    and top.score - runner_up_score
+                    >= self.config.fuzzy_min_score_gap
+                ):
+                    return MatchResolution(
+                        match_status=MatchStatus.FUZZY_MATCH,
+                        organization=top.organization,
+                        match_score=top.score,
+                    )
+                return MatchResolution(
+                    match_status=MatchStatus.FUZZY_CANDIDATES,
+                    candidates=fuzzy_candidates,
+                    reason="FUZZY_REVIEW_REQUIRED",
+                )
+
         return MatchResolution(
             match_status=MatchStatus.NOT_FOUND,
-            reason="NO_EXACT_MATCH",
+            reason="NO_MATCH",
         )
 
     def _resolve_deterministic_group(

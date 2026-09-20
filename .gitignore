@@ -12,7 +12,18 @@ __pycache__/
 .uv-python/
 .tools/
 
+# Frontend build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
 # Generated evaluation artifacts
 data/processed/
 evaluation/reports/
-

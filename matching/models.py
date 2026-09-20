@@ -14,7 +14,7 @@ class MatchStatus(str, Enum):
     SEARCH_KEY_MATCH = "SEARCH_KEY_MATCH"
     ALIAS_MATCH = "ALIAS_MATCH"
     FUZZY_CANDIDATES = "FUZZY_CANDIDATES"
-    FUZZY_MATCH = "FUZZY_MATCH"  # Reserved for a later, benchmarked version.
+    FUZZY_MATCH = "FUZZY_MATCH"
     AMBIGUOUS_MATCH = "AMBIGUOUS_MATCH"
     NOT_FOUND = "NOT_FOUND"
     INVALID_INPUT = "INVALID_INPUT"
@@ -29,6 +29,10 @@ DETERMINISTIC_MATCH_STATUSES = frozenset(
         MatchStatus.ALIAS_MATCH,
     }
 )
+
+RESOLVED_MATCH_STATUSES = DETERMINISTIC_MATCH_STATUSES | {
+    MatchStatus.FUZZY_MATCH,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +114,17 @@ class MatchResolution:
     @property
     def is_resolved(self) -> bool:
         return (
-            self.match_status in DETERMINISTIC_MATCH_STATUSES
+            self.match_status in RESOLVED_MATCH_STATUSES
             and self.organization is not None
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PayrollInfo:
+    """Payroll fields read from the registry after entity resolution."""
+
+    paying_organization: str | None
+    payroll_status: str
 
 
 def _optional_string(value: Any) -> str | None:
