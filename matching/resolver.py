@@ -1,4 +1,4 @@
-"""Resolver orchestration for deterministic and fuzzy entity matching."""
+"""Resolver orchestration for strict deterministic entity matching."""
 
 from __future__ import annotations
 
@@ -9,9 +9,7 @@ from preprocessing.normalize import to_search_key
 from preprocessing.validate import SearchInput
 
 from .alias_match import AliasMatcher
-from .candidate_generator import CandidateGenerator
 from .exact_match import ExactMatcher
-from .fuzzy_match import FuzzyMatcher
 from .models import (
     MatchCandidate,
     MatchResolution,
@@ -24,10 +22,6 @@ from .repository import OrganizationRepository
 @dataclass(frozen=True, slots=True)
 class MatchingConfig:
     strict_mode: bool = True
-    fuzzy_scorer: str = "WRatio"
-    fuzzy_minimum_score: float = 95.0
-    fuzzy_top_k: int = 5
-    minimum_fuzzy_query_key_length: int = 3
 
 
 class OrganizationResolver:
@@ -42,12 +36,6 @@ class OrganizationResolver:
         self.config = config or MatchingConfig()
         self.exact_matcher = ExactMatcher(repository)
         self.alias_matcher = AliasMatcher(repository)
-        self.candidate_generator = CandidateGenerator(repository)
-        self.fuzzy_matcher = FuzzyMatcher(
-            scorer_name=self.config.fuzzy_scorer,
-            minimum_score=self.config.fuzzy_minimum_score,
-            top_k=self.config.fuzzy_top_k,
-        )
 
     def resolve(self, request: SearchInput) -> MatchResolution:
         """Run ID -> name -> normalized -> key -> alias stages (Strict Deterministic)."""
@@ -83,40 +71,9 @@ class OrganizationResolver:
                 request,
             )
 
-        # In strict mode: 100% exact match or UNKNOWN. Do not run fuzzy candidates.
-        if self.config.strict_mode:
-            return MatchResolution(
-                match_status=MatchStatus.NOT_FOUND,
-                reason="NO_EXACT_MATCH",
-            )
-
-        if (
-            len(to_search_key(request.organization_name))
-            < self.config.minimum_fuzzy_query_key_length
-        ):
-            return MatchResolution(
-                match_status=MatchStatus.INVALID_INPUT,
-                reason="QUERY_TOO_SHORT_FOR_FUZZY_MATCHING",
-            )
-
-        pool = self.candidate_generator.generate(
-            province_name=request.province_name,
-            organization_type_code=request.organization_type,
-        )
-        fuzzy_candidates = self.fuzzy_matcher.rank(
-            request.organization_name,
-            pool.organizations,
-            pool.aliases,
-        )
-        if not fuzzy_candidates:
-            return MatchResolution(
-                match_status=MatchStatus.NOT_FOUND,
-                reason="NO_CANDIDATE_ABOVE_FUZZY_THRESHOLD",
-            )
         return MatchResolution(
-            match_status=MatchStatus.FUZZY_CANDIDATES,
-            candidates=fuzzy_candidates,
-            match_score=fuzzy_candidates[0].score,
+            match_status=MatchStatus.NOT_FOUND,
+            reason="NO_EXACT_MATCH",
         )
 
     def _resolve_deterministic_group(

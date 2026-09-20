@@ -19,7 +19,7 @@ from preprocessing.normalize import normalize_name, to_search_key
 # ── 1. Load Dataset into In-Memory Repository ──────────────────────────────────
 _PROJECT_ROOT = Path(__file__).resolve().parent
 DATASET_PATH = _PROJECT_ROOT / "data" / "dataset.csv"
-ALIASES_PATH = _PROJECT_ROOT / "data" / "test" / "aliases.csv"
+ALIASES_PATH = _PROJECT_ROOT / "data" / "aliases.csv"
 
 print("[INFO] Loading dataset into memory...")
 df = pd.read_csv(DATASET_PATH, dtype=str, keep_default_na=False)

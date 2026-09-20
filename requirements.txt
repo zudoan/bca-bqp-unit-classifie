@@ -1,2 +1,2 @@
 pandas>=2.2,<4
-rapidfuzz>=3.10,<4
+gradio>=5.20.0

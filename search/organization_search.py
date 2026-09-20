@@ -78,21 +78,11 @@ class OrganizationSearchService:
                 for candidate in resolution.candidates
             ]
         elif resolution.match_status in {
-            MatchStatus.FUZZY_CANDIDATES,
             MatchStatus.AMBIGUOUS_MATCH,
             MatchStatus.NOT_FOUND,
         }:
             result["candidates"] = []
 
-        if resolution.match_status == MatchStatus.FUZZY_CANDIDATES:
-            scores = [candidate.score for candidate in resolution.candidates]
-            result["top1_score"] = _display_score(scores[0])
-            result["top2_score"] = (
-                _display_score(scores[1]) if len(scores) > 1 else None
-            )
-            result["score_margin"] = (
-                round(scores[0] - scores[1], 2) if len(scores) > 1 else None
-            )
         if resolution.reason:
             result["reason"] = resolution.reason
         return result
