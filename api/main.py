@@ -8,16 +8,21 @@ unchanged.
 from __future__ import annotations
 
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from matching.repository import InMemoryOrganizationRepository
 from matching.resolver import MatchingConfig
+from search.batch_processing import BatchProcessingError, process_batch_file
 from search.organization_search import OrganizationSearchService
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -58,6 +63,13 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Batch-Input-Count",
+        "X-Batch-Paid-Count",
+        "X-Batch-Not-Paid-Count",
+        "X-Batch-Unresolved-Count",
+    ],
 )
 
 
@@ -95,6 +107,59 @@ def search_get(
         organization_name=organization_name,
         province_name=province_name,
         organization_type=organization_type,
+    )
+
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@app.post(
+    "/api/v1/organizations/batch",
+    summary="Phân loại danh sách đơn vị từ Excel hoặc Word",
+    responses={
+        200: {
+            "content": {"application/zip": {}},
+            "description": "ZIP chứa hai file: được trả lương và không được trả lương.",
+        }
+    },
+)
+async def batch_search(
+    file: UploadFile = File(...),
+    column_name: Optional[str] = Form(None, max_length=128),
+):
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    await file.close()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="File vượt giới hạn 10 MB.",
+        )
+
+    try:
+        artifact = await run_in_threadpool(
+            process_batch_file,
+            file.filename or "",
+            content,
+            service,
+            column_name.strip() if column_name and column_name.strip() else None,
+        )
+    except BatchProcessingError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    encoded_name = quote(artifact.archive_name)
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="batch-results.zip"; filename*=UTF-8\'\'{encoded_name}'
+        ),
+        "X-Batch-Input-Count": str(artifact.input_count),
+        "X-Batch-Paid-Count": str(artifact.paid_count),
+        "X-Batch-Not-Paid-Count": str(artifact.not_paid_count),
+        "X-Batch-Unresolved-Count": str(artifact.unresolved_count),
+    }
+    return StreamingResponse(
+        BytesIO(artifact.archive),
+        media_type="application/zip",
+        headers=headers,
     )
 
 

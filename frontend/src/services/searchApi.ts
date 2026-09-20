@@ -1,4 +1,9 @@
-import type { RegistryStats, SearchRequest, SearchResponse } from "../types/search";
+import type {
+  BatchProcessResult,
+  RegistryStats,
+  SearchRequest,
+  SearchResponse,
+} from "../types/search";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === "true";
@@ -220,6 +225,62 @@ export async function getRegistryStats(): Promise<RegistryStats> {
   } catch {
     return stats;
   }
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return "ket_qua_tra_luong.zip";
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  return disposition.match(/filename="?([^";]+)"?/i)?.[1] || "ket_qua_tra_luong.zip";
+}
+
+export async function processBatchFile(
+  file: File,
+  columnName?: string,
+  signal?: AbortSignal,
+): Promise<BatchProcessResult> {
+  if (USE_MOCK_API) {
+    throw new Error("Chức năng xử lý file cần kết nối backend trực tiếp.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  if (columnName?.trim()) formData.append("column_name", columnName.trim());
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/organizations/batch`, {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+
+  if (!response.ok) {
+    let message = `Không thể xử lý file (mã lỗi ${response.status}).`;
+    try {
+      const body = await response.json() as { detail?: string };
+      if (body.detail) message = body.detail;
+    } catch {
+      // Keep the HTTP status fallback when the response is not JSON.
+    }
+    throw new Error(message);
+  }
+
+  const numberHeader = (name: string) => Number(response.headers.get(name) || 0);
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get("Content-Disposition")),
+    summary: {
+      inputCount: numberHeader("X-Batch-Input-Count"),
+      paidCount: numberHeader("X-Batch-Paid-Count"),
+      notPaidCount: numberHeader("X-Batch-Not-Paid-Count"),
+      unresolvedCount: numberHeader("X-Batch-Unresolved-Count"),
+    },
+  };
 }
 
 export const apiMode = USE_MOCK_API ? "mock" : "live";

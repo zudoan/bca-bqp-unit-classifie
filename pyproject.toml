@@ -9,10 +9,19 @@ description = "Deterministic organization entity resolution and BCA/BQP registry
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "fastapi>=0.110,<1",
+  "httpx>=0.24,<1",
   "pandas>=2.2,<4",
+  "pydantic>=2,<3",
   "psycopg[binary]>=3.2,<4",
+  "requests>=2.31,<3",
   "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.29,<1",
   "rapidfuzz>=3.9,<4",
+  "openpyxl>=3.1,<4",
+  "python-docx>=1.1,<2",
+  "python-multipart>=0.0.9,<1",
+  "xlrd>=2.0,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -257,6 +257,27 @@ Invoke-RestMethod `
 GET http://localhost:7860/api/v1/organizations/BCA-CENTRAL-000003
 ```
 
+### Phân loại hàng loạt từ Excel / Word
+
+Giao diện hỗ trợ kéo-thả file `.xlsx`, `.xls` hoặc `.docx` (tối đa 10 MB và 5.000 dòng). Hệ thống tự nhận diện các tiêu đề thông dụng như `Tên đơn vị`, `Tên tổ chức`, `organization_name`; nếu file có nhiều cột không rõ nghĩa, người dùng có thể nhập chính xác tên cột trên giao diện.
+
+Mỗi tên đơn vị được đưa qua đúng pipeline Exact-first/Fuzzy-safe của tra cứu đơn lẻ. Kết quả tải về là một file ZIP chứa đúng hai file (`.xlsx` cho đầu vào Excel, `.docx` cho đầu vào Word):
+
+- `*_duoc_tra_luong.xlsx|docx`: các đơn vị đã được định danh duy nhất và có trạng thái `Do BCA trả lương` hoặc `Do BQP trả lương`.
+- `*_khong_duoc_tra_luong.xlsx|docx`: các đơn vị đã được định danh duy nhất và có trạng thái `Không do BCA/BQP trả lương`.
+
+Các dòng `NOT_FOUND`, `AMBIGUOUS_MATCH` hoặc `FUZZY_CANDIDATES` không bị gán nhầm vào nhóm không được trả lương. Chúng được giữ trong sheet/phụ lục `Chưa thể kết luận` của file thứ hai để người dùng rà soát.
+
+Ví dụ gọi API:
+
+```powershell
+curl.exe -X POST `
+  -F "file=@danh-sach.xlsx" `
+  -F "column_name=Tên đơn vị" `
+  -o ket-qua-tra-luong.zip `
+  http://localhost:7860/api/v1/organizations/batch
+```
+
 ### Endpoints
 
 | Method | Endpoint | Mục đích |
@@ -265,6 +286,7 @@ GET http://localhost:7860/api/v1/organizations/BCA-CENTRAL-000003
 | `POST` | `/api/v1/organizations/search` | Tra cứu bằng JSON body |
 | `GET` | `/api/v1/organizations/search` | Tra cứu bằng query parameters |
 | `GET` | `/api/v1/organizations/{organization_id}` | Lấy bản ghi theo ID |
+| `POST` | `/api/v1/organizations/batch` | Nhận Excel/Word và trả ZIP gồm hai danh sách phân loại |
 
 ## Trạng thái kết quả
 

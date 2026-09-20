@@ -51,3 +51,16 @@ export interface RegistryStats {
   bqp: number;
   provinces: number;
 }
+
+export interface BatchProcessSummary {
+  inputCount: number;
+  paidCount: number;
+  notPaidCount: number;
+  unresolvedCount: number;
+}
+
+export interface BatchProcessResult {
+  blob: Blob;
+  filename: string;
+  summary: BatchProcessSummary;
+}

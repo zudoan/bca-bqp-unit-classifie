@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { GoogleIcon } from "./components/Icons";
-import { apiMode, getRegistryStats, searchOrganization } from "./services/searchApi";
+import { apiMode, getRegistryStats, processBatchFile, searchOrganization } from "./services/searchApi";
 import type {
+  BatchProcessSummary,
   OrganizationCandidate,
   RegistryStats,
   SearchRequest,
@@ -192,7 +193,7 @@ function App() {
             </div>
           </section>
 
-          <RegistryStatsBar stats={stats} />
+          <BatchUploadPanel />
 
           <section className="registry-desk">
             <SearchPanel
@@ -233,6 +234,145 @@ function App() {
   );
 }
 
+function BatchUploadPanel() {
+  const [file, setFile] = useState<File | null>(null);
+  const [columnName, setColumnName] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState("");
+  const [summary, setSummary] = useState<BatchProcessSummary | null>(null);
+  const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+      if (download) URL.revokeObjectURL(download.url);
+    };
+  }, [download]);
+
+  function selectFile(selected: File | null) {
+    setError("");
+    setSummary(null);
+    if (download) {
+      URL.revokeObjectURL(download.url);
+      setDownload(null);
+    }
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+    const extension = selected.name.split(".").pop()?.toLowerCase();
+    if (!extension || !["xlsx", "xls", "docx"].includes(extension)) {
+      setFile(null);
+      setError("Chỉ hỗ trợ file .xlsx, .xls hoặc .docx.");
+      return;
+    }
+    if (selected.size > 10 * 1024 * 1024) {
+      setFile(null);
+      setError("File vượt giới hạn 10 MB.");
+      return;
+    }
+    setFile(selected);
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    selectFile(event.target.files?.[0] || null);
+  }
+
+  function onDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    selectFile(event.dataTransfer.files?.[0] || null);
+  }
+
+  function triggerDownload(url: string, filename: string) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  async function submitBatch(event: FormEvent) {
+    event.preventDefault();
+    if (!file || processing) return;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setProcessing(true);
+    setError("");
+    setSummary(null);
+    try {
+      const result = await processBatchFile(file, columnName, controller.signal);
+      if (download) URL.revokeObjectURL(download.url);
+      const url = URL.createObjectURL(result.blob);
+      setDownload({ url, filename: result.filename });
+      setSummary(result.summary);
+      triggerDownload(url, result.filename);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setError(caught instanceof Error ? caught.message : "Không thể xử lý file.");
+    } finally {
+      if (!controller.signal.aborted) setProcessing(false);
+    }
+  }
+
+  return (
+    <section className="desk-panel batch-panel" aria-labelledby="batch-title">
+      <div className="batch-heading">
+        <div className="batch-title-block">
+          <span className="batch-icon"><GoogleIcon name="upload_file" size={25} /></span>
+          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel</h2><p>Tải một lần, nhận ZIP gồm hai file: đơn vị được trả lương và đơn vị không được trả lương.</p></div>
+        </div>
+        <span className="batch-limit">TỐI ĐA 10 MB · 5.000 DÒNG</span>
+      </div>
+
+      <form className="batch-form" onSubmit={submitBatch}>
+        <label
+          className={`file-dropzone ${dragActive ? "is-dragging" : ""} ${file ? "has-file" : ""}`}
+          onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={onDrop}
+        >
+          <input type="file" accept=".xlsx,.xls,.docx" onChange={onFileChange} />
+          <GoogleIcon name={file ? "description" : "cloud_upload"} size={29} />
+          <span><strong>{file ? file.name : "Chọn hoặc kéo thả file vào đây"}</strong><small>{file ? `${(file.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 0 })} KB` : "Excel .xlsx/.xls hoặc Word .docx"}</small></span>
+        </label>
+
+        <div className="batch-column-field">
+          <label htmlFor="batch-column">Tên cột chứa đơn vị <span>(tùy chọn)</span></label>
+          <input id="batch-column" value={columnName} onChange={(event) => setColumnName(event.target.value)} placeholder="Tự nhận diện: Tên đơn vị, Tên tổ chức..." />
+          <small>Để trống nếu file chỉ có một cột hoặc dùng tiêu đề phổ biến.</small>
+        </div>
+
+        <button className="batch-submit" type="submit" disabled={!file || processing}>
+          {processing ? <span className="spinner" /> : <GoogleIcon name="rule" size={20} />}
+          {processing ? "Đang đối chiếu..." : "Phân loại và xuất kết quả"}
+        </button>
+      </form>
+
+      <div className="batch-note"><GoogleIcon name="verified_user" size={17} /><span>Các dòng fuzzy chưa đủ chắc chắn được giữ ở phụ lục “Chưa thể kết luận”, không bị gán nhầm vào nhóm không được trả lương.</span></div>
+
+      {(error || summary) && (
+        <div className={`batch-feedback ${error ? "is-error" : "is-success"}`} aria-live="polite">
+          {error ? (
+            <><GoogleIcon name="error" size={20} filled /><span>{error}</span></>
+          ) : summary ? (
+            <>
+              <GoogleIcon name="task_alt" size={21} filled />
+              <div><strong>Đã xử lý {formatNumber(summary.inputCount)} dòng</strong><span>{formatNumber(summary.paidCount)} được trả lương · {formatNumber(summary.notPaidCount)} không được trả lương · {formatNumber(summary.unresolvedCount)} chưa thể kết luận</span></div>
+              {download && <button type="button" onClick={() => triggerDownload(download.url, download.filename)}><GoogleIcon name="download" size={18} /> Tải lại ZIP</button>}
+            </>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Sidebar({ stats }: { stats: RegistryStats }) {
   return (
     <aside className="portal-sidebar">
@@ -246,14 +386,6 @@ function Sidebar({ stats }: { stats: RegistryStats }) {
         <div className="active-module"><GoogleIcon name="manage_search" size={20} /><span>Tra cứu tổ chức</span><i>01</i></div>
       </div>
 
-      <div className="sidebar-section registry-summary">
-        <span className="sidebar-label">Hồ sơ dữ liệu</span>
-        <dl>
-          <div><dt>Tổng bản ghi</dt><dd>{formatNumber(stats.total)}</dd></div>
-          <div><dt>Phạm vi địa phương</dt><dd>{stats.provinces}</dd></div>
-          <div><dt>Cơ quan quản lý</dt><dd>02</dd></div>
-        </dl>
-      </div>
 
       <div className="sidebar-process">
         <span className="sidebar-label">Quy trình xác thực</span>
@@ -365,29 +497,6 @@ function SearchPanel(props: SearchPanelProps) {
           ))}
         </div>
       </div>
-    </section>
-  );
-}
-
-function RegistryStatsBar({ stats }: { stats: RegistryStats }) {
-  const items = [
-    { code: "REG", value: formatNumber(stats.total), label: "Tổng tổ chức", icon: <GoogleIcon name="database" size={20} /> },
-    { code: "BCA", value: formatNumber(stats.bca), label: "Bộ Công an", icon: <GoogleIcon name="local_police" size={20} /> },
-    { code: "BQP", value: formatNumber(stats.bqp), label: "Bộ Quốc phòng", icon: <GoogleIcon name="shield" size={20} /> },
-    { code: "LOC", value: String(stats.provinces), label: "Tỉnh, thành phố", icon: <GoogleIcon name="location_on" size={20} /> },
-  ];
-
-  return (
-    <section className="registry-metrics" aria-label="Thống kê Master Registry">
-      {items.map((item) => (
-        <div className={`metric metric-${item.code.toLowerCase()}`} key={item.code}>
-          <span className="metric-code">{item.code}</span>
-          <span className="metric-icon">{item.icon}</span>
-          <strong>{item.value}</strong>
-          <small>{item.label}</small>
-        </div>
-      ))}
-      <div className="metric-asof"><span>Dữ liệu hiện hành</span><strong>MASTER REGISTRY</strong></div>
     </section>
   );
 }
