@@ -8,6 +8,7 @@ unchanged.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+
+from api.admin import initialize_admin_account, router as admin_router
+from api.auth import router as auth_router
+from api.database import initialize_database
 
 from matching.acronym_match import AcronymMatcher
 from matching.repository import InMemoryOrganizationRepository
@@ -55,6 +60,13 @@ service = OrganizationSearchService(
 )
 ocr_provider = GeminiOcrProvider.from_environment()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_database()
+    initialize_admin_account()
+    yield
+
 app = FastAPI(
     title="BCA/BQP Organization Registry API",
     description=(
@@ -62,6 +74,7 @@ app = FastAPI(
         "followed by payroll-first and BCA/BQP management lookup."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 cors_origins = [
@@ -76,8 +89,8 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Gemini-Api-Key"],
     expose_headers=[
         "Content-Disposition",
@@ -88,6 +101,9 @@ app.add_middleware(
         "X-Batch-Input-Mode",
     ],
 )
+
+app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 class SearchRequest(BaseModel):
