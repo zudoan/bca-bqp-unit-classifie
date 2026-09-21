@@ -4,8 +4,8 @@ import type {
   SearchRequest,
   SearchResponse,
 } from "../types/search";
+import { apiUrl } from "./apiClient";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === "true";
 
 const stats: RegistryStats = {
@@ -199,7 +199,7 @@ export async function searchOrganization(
     return mockSearch(request, signal);
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/organizations/search`, {
+  const response = await fetch(apiUrl("/api/v1/organizations/search"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -217,7 +217,7 @@ export async function getRegistryStats(): Promise<RegistryStats> {
   if (USE_MOCK_API) return stats;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
+    const response = await fetch(apiUrl("/health"));
     if (!response.ok) throw new Error();
     const data = await response.json() as { total_organizations: number };
     // Backend không có stats đầy đủ, dùng default + total từ health endpoint
@@ -253,7 +253,7 @@ export async function processBatchFile(
   formData.append("file", file);
   if (columnName?.trim()) formData.append("column_name", columnName.trim());
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/organizations/batch`, {
+  const response = await fetch(apiUrl("/api/v1/organizations/batch"), {
     method: "POST",
     body: formData,
     signal,

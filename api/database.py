@@ -16,7 +16,21 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 _ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DATABASE_PATH = (_ROOT / "storage" / "users.db").resolve()
 DEFAULT_DATABASE_URL = f"sqlite:///{_DEFAULT_DATABASE_PATH.as_posix()}"
-DATABASE_URL = os.getenv("USER_DATABASE_URL", DEFAULT_DATABASE_URL).strip() or DEFAULT_DATABASE_URL
+
+
+def _normalize_database_url(database_url: str) -> str:
+    """Use SQLAlchemy's explicit psycopg 3 driver for Render Postgres URLs."""
+
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+
+DATABASE_URL = _normalize_database_url(
+    os.getenv("USER_DATABASE_URL", DEFAULT_DATABASE_URL).strip() or DEFAULT_DATABASE_URL
+)
 
 
 class Base(DeclarativeBase):

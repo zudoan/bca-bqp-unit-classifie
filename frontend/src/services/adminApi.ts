@@ -1,4 +1,5 @@
 import type { UserRole } from "../types/portal";
+import { apiUrl, authenticatedHeaders } from "./apiClient";
 
 export interface ManagedUser {
   id: string;
@@ -45,10 +46,12 @@ async function adminError(response: Response, fallback: string) {
 
 async function adminRequest(path: string, init?: RequestInit) {
   try {
-    return await fetch(`/api/v1/admin${path}`, {
+    const headers = authenticatedHeaders(init?.headers);
+    if (init?.body) headers.set("Content-Type", "application/json");
+    return await fetch(apiUrl(`/api/v1/admin${path}`), {
       ...init,
       credentials: "include",
-      headers: init?.body ? { "Content-Type": "application/json", ...init.headers } : init?.headers,
+      headers,
     });
   } catch {
     throw new Error("Không thể kết nối dịch vụ quản trị người dùng.");

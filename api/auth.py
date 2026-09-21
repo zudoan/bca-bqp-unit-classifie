@@ -137,15 +137,22 @@ def _set_session_cookie(response: Response, token: str, max_age: int | None) -> 
     )
 
 
+def _request_session_token(request: Request) -> str | None:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        return token
+    auth_header = request.headers.get("Authorization", "")
+    scheme, _, credentials = auth_header.partition(" ")
+    if scheme.lower() == "bearer" and credentials.strip():
+        return credentials.strip()
+    return None
+
+
 def require_current_user(
     request: Request,
     database: Session = Depends(get_database),
 ) -> User:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.removeprefix("Bearer ").strip()
+    token = _request_session_token(request)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập không tồn tại.")
 
@@ -228,7 +235,7 @@ def logout(
     response: Response,
     database: Session = Depends(get_database),
 ) -> None:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
+    token = _request_session_token(request)
     if token:
         session_record = database.scalar(
             select(UserSession).where(

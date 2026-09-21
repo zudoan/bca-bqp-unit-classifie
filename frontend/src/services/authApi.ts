@@ -1,6 +1,12 @@
 import type { PortalSession, UserRole } from "../types/portal";
+import {
+  apiUrl,
+  authenticatedHeaders,
+  clearAuthToken,
+  saveAuthToken,
+} from "./apiClient";
 
-const AUTH_BASE_URL = "/api/v1/auth";
+const AUTH_BASE_PATH = "/api/v1/auth";
 
 interface BackendUser {
   id: string;
@@ -15,6 +21,7 @@ interface BackendUser {
 
 interface AuthenticationResponse {
   user: BackendUser;
+  token?: string | null;
 }
 
 export interface RegistrationInput {
@@ -58,16 +65,34 @@ async function errorMessage(response: Response, fallback: string) {
 
 async function authRequest(path: string, init?: RequestInit) {
   try {
-    return await fetch(`${AUTH_BASE_URL}${path}`, {
+    const headers = authenticatedHeaders(init?.headers);
+    if (init?.body) headers.set("Content-Type", "application/json");
+    return await fetch(apiUrl(`${AUTH_BASE_PATH}${path}`), {
       ...init,
       credentials: "include",
-      headers: init?.body
-        ? { "Content-Type": "application/json", ...init.headers }
-        : init?.headers,
+      headers,
     });
   } catch {
     throw new Error("Không thể kết nối dịch vụ tài khoản. Vui lòng kiểm tra máy chủ và thử lại.");
   }
+}
+
+async function authenticationBody(response: Response, remember?: boolean) {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra VITE_API_BASE_URL.");
+  }
+  let body: AuthenticationResponse;
+  try {
+    body = JSON.parse(text) as AuthenticationResponse;
+  } catch {
+    throw new Error("Backend không trả về dữ liệu JSON hợp lệ. Vui lòng kiểm tra VITE_API_BASE_URL.");
+  }
+  if (!body?.user) {
+    throw new Error("Backend trả về response không đầy đủ. Vui lòng kiểm tra kết nối API.");
+  }
+  if (body.token && remember !== undefined) saveAuthToken(body.token, remember);
+  return toPortalSession(body.user);
 }
 
 export async function authenticateAccount(username: string, password: string, remember: boolean) {
@@ -76,19 +101,7 @@ export async function authenticateAccount(username: string, password: string, re
     body: JSON.stringify({ username, password, remember }),
   });
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể đăng nhập tài khoản."));
-  
-  // Check if response has content before parsing
-  const text = await response.text();
-  if (!text || text.trim() === '') {
-    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
-  }
-  
-  try {
-    const data = JSON.parse(text) as AuthenticationResponse;
-    return toPortalSession(data.user);
-  } catch (error) {
-    throw new Error("Không thể xử lý response từ server. Response nhận được: " + text.substring(0, 100));
-  }
+  return authenticationBody(response, remember);
 }
 
 export async function registerAccount(input: RegistrationInput, remember: boolean) {
@@ -103,43 +116,26 @@ export async function registerAccount(input: RegistrationInput, remember: boolea
     }),
   });
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể tạo tài khoản."));
-  
-  // Check if response has content before parsing
-  const text = await response.text();
-  if (!text || text.trim() === '') {
-    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
-  }
-  
-  try {
-    const data = JSON.parse(text) as AuthenticationResponse;
-    return toPortalSession(data.user);
-  } catch (error) {
-    throw new Error("Không thể xử lý response từ server. Response nhận được: " + text.substring(0, 100));
-  }
+  return authenticationBody(response, remember);
 }
 
 export async function restoreSession(): Promise<PortalSession | null> {
   const response = await authRequest("/me");
-  if (response.status === 401) return null;
+  if (response.status === 401) {
+    clearAuthToken();
+    return null;
+  }
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể kiểm tra phiên đăng nhập."));
-  
-  // Check if response has content before parsing
-  const text = await response.text();
-  if (!text || text.trim() === '') {
-    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
-  }
-  
-  try {
-    const data = JSON.parse(text) as AuthenticationResponse;
-    return toPortalSession(data.user);
-  } catch (error) {
-    throw new Error("Không thể xử lý response từ server.");
-  }
+  return authenticationBody(response);
 }
 
 export async function logoutAccount() {
-  const response = await authRequest("/logout", { method: "POST" });
-  if (!response.ok && response.status !== 401) {
-    throw new Error(await errorMessage(response, "Không thể đăng xuất tài khoản."));
+  try {
+    const response = await authRequest("/logout", { method: "POST" });
+    if (!response.ok && response.status !== 401) {
+      throw new Error(await errorMessage(response, "Không thể đăng xuất tài khoản."));
+    }
+  } finally {
+    clearAuthToken();
   }
 }

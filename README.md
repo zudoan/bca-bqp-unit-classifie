@@ -240,6 +240,27 @@ CORS_ORIGINS=https://bca-bqp-frontend.onrender.com
 
 Có thể khai báo nhiều domain, phân tách bằng dấu phẩy. Không dùng `*` cho môi trường production.
 
+### Deploy đồng bộ trên Render
+
+Repository có file `render.yaml` để triển khai frontend, backend và PostgreSQL cùng một cấu hình. Trên Render, chọn **New > Blueprint**, kết nối repository này và dùng file Blueprint mặc định `render.yaml`.
+
+Khi tạo Blueprint lần đầu, nhập đủ ba biến bí mật `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Mật khẩu quản trị phải có ít nhất 8 ký tự, gồm chữ và số. Nếu Blueprint được gắn vào các service đã tồn tại, Render không tự cập nhật các biến có `sync: false`; khi đó hãy thêm thủ công ba biến trên vào service `bca-bqp-api`.
+
+Cấu hình tương ứng nếu tiếp tục dùng hai service hiện tại thay vì Blueprint:
+
+| Service | Thiết lập | Giá trị |
+| --- | --- | --- |
+| `manage-organization` (Static Site) | Root Directory | `frontend` |
+| | Build Command | `npm ci && npm run build` |
+| | Publish Directory | `dist` |
+| | `VITE_API_BASE_URL` | `https://bca-bqp-api.onrender.com` |
+| `bca-bqp-api` (Web Service) | Build Command | `pip install -r requirements-backend.txt` |
+| | Start Command | `uvicorn api.main:app --host 0.0.0.0 --port $PORT` |
+| | Health Check Path | `/health` |
+| | `CORS_ORIGINS` | `https://bca-bqp-frontend.onrender.com` |
+
+Không thêm dấu `/` ở cuối các URL. Sau khi đổi `VITE_API_BASE_URL`, cần **Clear build cache & deploy** frontend vì biến `VITE_*` được đóng gói tại thời điểm build. Backend hỗ trợ cả cookie bảo mật và Bearer token, nên phiên đăng nhập vẫn hoạt động khi trình duyệt chặn cookie bên thứ ba giữa hai domain Render.
+
 ### Gradio UI tùy chọn
 
 ```powershell

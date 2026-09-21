@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: bca-bqp-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-backend.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+      - key: USER_DATABASE_URL
+        fromDatabase:
+          name: bca-bqp-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://bca-bqp-frontend.onrender.com,https://manage-organization.onrender.com
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_DISPLAY_NAME
+        value: Quản trị viên hệ thống
+  - type: web
+    name: manage-organization
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_API_BASE_URL
+        value: https://bca-bqp-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: bca-bqp-db
+    plan: free
+    databaseName: bca_bqp
+    user: bca_bqp
