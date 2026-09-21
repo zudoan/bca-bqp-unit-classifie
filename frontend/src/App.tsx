@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { GoogleIcon } from "./components/Icons";
+import { AdminUsersPanel } from "./components/AdminUsersPanel";
+import { HistoryPanel } from "./components/HistoryPanel";
+import { LoginScreen } from "./components/LoginScreen";
+import { logoutAccount, restoreSession } from "./services/authApi";
 import { apiMode, getRegistryStats, processBatchFile, searchOrganization } from "./services/searchApi";
+import {
+  createTransactionId,
+  loadTransactions,
+  saveTransactions,
+} from "./services/portalStore";
 import type {
   BatchProcessSummary,
   OrganizationCandidate,
@@ -9,6 +18,12 @@ import type {
   SearchRequest,
   SearchResponse,
 } from "./types/search";
+import type {
+  PortalSession,
+  PortalView,
+  TransactionOutcome,
+  TransactionRecord,
+} from "./types/portal";
 
 const DEFAULT_STATS: RegistryStats = { total: 14_303, bca: 9_689, bqp: 4_614, provinces: 63 };
 
@@ -56,7 +71,7 @@ const STATUS_LABELS: Record<string, string> = {
   NORMALIZED_MATCH: "Khớp tên sau chuẩn hóa",
   SEARCH_KEY_MATCH: "Khớp khóa tìm kiếm không dấu",
   ALIAS_MATCH: "Khớp tên viết tắt / tên gọi khác",
-  ACRONYM_MATCH: "Khớp tên viết tắt từ bộ dữ liệu acronym",
+  ACRONYM_MATCH: "Khớp tên viết tắt từ bộ từ điển",
   FUZZY_MATCH: "Khớp gần đúng có độ tin cậy cao",
   FUZZY_CANDIDATES: "Các ứng viên gần đúng cần xác nhận",
   AMBIGUOUS_MATCH: "Nhiều tổ chức cùng thỏa điều kiện",
@@ -90,7 +105,18 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("vi-VN").format(value);
 }
 
+function outcomeFromResponse(response: SearchResponse): TransactionOutcome {
+  if (response.organization_id) return "SUCCESS";
+  if (response.match_status === "AMBIGUOUS_MATCH" || response.match_status === "FUZZY_CANDIDATES") return "REVIEW";
+  return "NOT_FOUND";
+}
+
 function App() {
+  const [session, setSession] = useState<PortalSession | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [activeView, setActiveView] = useState<PortalView>("search");
+  const [transactions, setTransactions] = useState<TransactionRecord[]>(() => loadTransactions());
+  const [accountOpen, setAccountOpen] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [province, setProvince] = useState("");
@@ -102,9 +128,41 @@ function App() {
   const [stats, setStats] = useState(DEFAULT_STATS);
   const abortRef = useRef<AbortController | null>(null);
 
+  function updateTransactions(updater: (current: TransactionRecord[]) => TransactionRecord[]) {
+    setTransactions((current) => {
+      const updated = updater(current).slice(0, 100);
+      saveTransactions(updated);
+      return updated;
+    });
+  }
+
+  function addTransaction(record: Omit<TransactionRecord, "id" | "userId" | "createdAt">) {
+    if (!session) return;
+    updateTransactions((current) => [{
+      ...record,
+      id: createTransactionId(),
+      userId: session.userId,
+      createdAt: new Date().toISOString(),
+    }, ...current]);
+  }
+
   useEffect(() => {
+    let active = true;
+    restoreSession()
+      .then((restoredSession) => {
+        if (active) setSession(restoredSession);
+      })
+      .catch(() => {
+        if (active) setSession(null);
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
     getRegistryStats().then(setStats).catch(() => setStats(DEFAULT_STATS));
-    return () => abortRef.current?.abort();
+    return () => {
+      active = false;
+      abortRef.current?.abort();
+    };
   }, []);
 
   const requestFromForm = (): SearchRequest => ({
@@ -126,9 +184,31 @@ function App() {
     try {
       const response = await searchOrganization(request, controller.signal);
       setResult(response);
+      addTransaction({
+        type: "SEARCH",
+        outcome: outcomeFromResponse(response),
+        title: request.organization_name || request.organization_id || "Yêu cầu không có định danh",
+        status: response.match_status,
+        request,
+        organizationId: response.organization_id,
+        organizationName: response.organization_name,
+        payingOrganization: response.paying_organization,
+        payrollStatus: response.payroll_status,
+        management: response.management,
+        detail: response.reason || response.errors?.join(" "),
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setNetworkError(error instanceof Error ? error.message : "Không thể kết nối tới dịch vụ tra cứu.");
+      const message = error instanceof Error ? error.message : "Không thể kết nối tới dịch vụ tra cứu.";
+      setNetworkError(message);
+      addTransaction({
+        type: "SEARCH",
+        outcome: "ERROR",
+        title: request.organization_name || request.organization_id || "Yêu cầu không có định danh",
+        status: "NETWORK_ERROR",
+        request,
+        detail: message,
+      });
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
@@ -167,75 +247,180 @@ function App() {
     setLoading(false);
   }
 
+  function login(nextSession: PortalSession) {
+    setSession(nextSession);
+    setActiveView("search");
+  }
+
+  async function logout() {
+    abortRef.current?.abort();
+    try {
+      await logoutAccount();
+    } catch {
+      // Clear the local view even when the backend is temporarily unavailable.
+    }
+    setAccountOpen(false);
+    setSession(null);
+    setActiveView("search");
+    resetSearch();
+  }
+
+  function openHistoryReplay(request: SearchRequest) {
+    setOrganizationName(request.organization_name || "");
+    setOrganizationId(request.organization_id || "");
+    setProvince(request.province_name || "");
+    setOrganizationType(request.organization_type || "");
+    setActiveView("search");
+    void runSearch(request);
+  }
+
+  function recordBatch(transaction: BatchTransactionEvent) {
+    addTransaction({
+      type: "BATCH",
+      outcome: transaction.error ? "ERROR" : "SUCCESS",
+      title: transaction.filename,
+      status: transaction.error ? "BATCH_ERROR" : "BATCH_COMPLETED",
+      filename: transaction.filename,
+      batchSummary: transaction.summary,
+      detail: transaction.error || (transaction.summary ? `${transaction.summary.inputCount} dòng đã được xử lý` : undefined),
+    });
+  }
+
+  function removeTransaction(id: string) {
+    updateTransactions((current) => current.filter((record) => record.id !== id));
+  }
+
+  function clearUserTransactions() {
+    if (!session || !window.confirm("Xóa toàn bộ lịch sử tra cứu của tài khoản này?")) return;
+    updateTransactions((current) => current.filter((record) => record.userId !== session.userId));
+  }
+
+  if (!authReady) {
+    return <main className="auth-loading-screen"><span className="spinner dark-spinner" /><strong>Đang kiểm tra phiên đăng nhập...</strong></main>;
+  }
+  if (!session) return <LoginScreen onLogin={login} />;
+
+  const userTransactions = transactions.filter((record) => record.userId === session.userId);
+  const viewTitle = activeView === "search"
+    ? "Tra cứu tổ chức"
+    : activeView === "history"
+      ? "Lịch sử tra cứu"
+      : "Quản lý người dùng";
+  const viewCode = activeView === "search" ? "TRA CỨU TỔ CHỨC" : activeView === "history" ? "NHẬT KÝ TRA CỨU" : "QUẢN TRỊ TÀI KHOẢN";
+
   return (
     <div className="portal-shell">
-      <Sidebar stats={stats} />
+      <Sidebar stats={stats} activeView={activeView} historyCount={userTransactions.length} isAdmin={session.role === "admin"} onNavigate={setActiveView} />
 
       <div className="portal-main">
         <header className="command-bar">
           <div className="mobile-brand">
             <span className="brand-seal"><GoogleIcon name="account_balance" size={22} filled /></span>
-            <strong>Registry BCA / BQP</strong>
+            <strong>Tra cứu BCA / BQP</strong>
           </div>
           <div className="breadcrumb" aria-label="Vị trí hiện tại">
-            <span>Hệ thống định danh</span><i>/</i><strong>Tra cứu tổ chức</strong>
+            <span>Hệ thống định danh</span><i>/</i><strong>{viewTitle}</strong>
           </div>
-          <div className="runtime-status" title={apiMode === "mock" ? "Dữ liệu mô phỏng frontend" : "Đã kết nối backend"}>
-            <span className="runtime-dot" />
-            {apiMode === "mock" ? "Môi trường trình diễn" : "Kết nối trực tuyến"}
+          <div className="command-actions">
+            <div className="runtime-status" title={apiMode === "mock" ? "Đang sử dụng dữ liệu mô phỏng" : "Đã kết nối máy chủ"}>
+              <span className="runtime-dot" />
+              {apiMode === "mock" ? "Môi trường trình diễn" : "Kết nối trực tuyến"}
+            </div>
+            <div className="account-menu">
+              <button className="account-trigger" type="button" onClick={() => setAccountOpen((value) => !value)} aria-expanded={accountOpen}>
+                <span className="account-avatar">{session.displayName.charAt(0).toLocaleUpperCase("vi")}</span>
+                <div><strong>{session.displayName}</strong><small>{session.role === "admin" ? "Quản trị viên" : "Người dùng tra cứu"}</small></div>
+                <GoogleIcon name="expand_more" size={18} />
+              </button>
+              {accountOpen && (
+                <div className="account-dropdown">
+                  <div><span className="account-avatar">{session.displayName.charAt(0).toLocaleUpperCase("vi")}</span><p><strong>{session.displayName}</strong><small>{session.email || `@${session.username}`}</small></p></div>
+                  <button type="button" onClick={() => { setActiveView("history"); setAccountOpen(false); }}><GoogleIcon name="history" size={19} /> Lịch sử tra cứu</button>
+                  {session.role === "admin" && <button type="button" onClick={() => { setActiveView("users"); setAccountOpen(false); }}><GoogleIcon name="manage_accounts" size={19} /> Quản lý người dùng</button>}
+                  <button type="button" onClick={() => void logout()}><GoogleIcon name="logout" size={19} /> Đăng xuất</button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
+
+        <nav className="mobile-view-tabs" aria-label="Chức năng">
+          <button type="button" className={activeView === "search" ? "is-active" : ""} onClick={() => setActiveView("search")}><GoogleIcon name="manage_search" size={19} />Tra cứu</button>
+          <button type="button" className={activeView === "history" ? "is-active" : ""} onClick={() => setActiveView("history")}><GoogleIcon name="history" size={19} />Lịch sử <span>{userTransactions.length}</span></button>
+          {session.role === "admin" && <button type="button" className={activeView === "users" ? "is-active" : ""} onClick={() => setActiveView("users")}><GoogleIcon name="manage_accounts" size={19} />Người dùng</button>}
+        </nav>
 
         <main className="workspace-main">
           <section className="page-heading">
             <div>
-              <span className="section-code">ORG RESOLUTION</span>
-              <h1>Tra cứu và định danh tổ chức</h1>
+              <span className="section-code">{viewCode}</span>
+              <h1>{activeView === "search" ? "Tra cứu và định danh tổ chức" : viewTitle}</h1>
+              {activeView === "history" && <p>Kiểm tra các lần tra cứu và xử lý file của tài khoản {session.displayName}.</p>}
+              {activeView === "users" && <p>Kiểm soát tài khoản, phân quyền và trạng thái truy cập hệ thống.</p>}
             </div>
           </section>
 
-          <BatchUploadPanel />
+          {activeView === "search" ? (
+            <>
+              <BatchUploadPanel onTransaction={recordBatch} />
 
-          <section className="registry-desk">
-            <SearchPanel
-              organizationName={organizationName}
-              organizationId={organizationId}
-              province={province}
-              organizationType={organizationType}
-              loading={loading}
-              hasResult={Boolean(result || networkError)}
-              onOrganizationName={setOrganizationName}
-              onOrganizationId={setOrganizationId}
-              onProvince={setProvince}
-              onOrganizationType={setOrganizationType}
-              onSubmit={handleSubmit}
-              onExample={chooseExample}
-              onReset={resetSearch}
+              <section className="registry-desk">
+                <SearchPanel
+                  organizationName={organizationName}
+                  organizationId={organizationId}
+                  province={province}
+                  organizationType={organizationType}
+                  loading={loading}
+                  hasResult={Boolean(result || networkError)}
+                  onOrganizationName={setOrganizationName}
+                  onOrganizationId={setOrganizationId}
+                  onProvince={setProvince}
+                  onOrganizationType={setOrganizationType}
+                  onSubmit={handleSubmit}
+                  onExample={chooseExample}
+                  onReset={resetSearch}
+                />
+
+                <div className="output-stack" aria-live="polite" aria-busy={loading}>
+                  <ResultPanel
+                    result={result}
+                    loading={loading}
+                    networkError={networkError}
+                    request={lastRequest}
+                    onCandidate={chooseCandidate}
+                  />
+                  <PipelinePanel result={result} loading={loading} request={lastRequest} />
+                </div>
+              </section>
+            </>
+          ) : activeView === "history" ? (
+            <HistoryPanel
+              records={userTransactions}
+              onReplay={openHistoryReplay}
+              onRemove={removeTransaction}
+              onClear={clearUserTransactions}
             />
-
-            <div className="output-stack" aria-live="polite" aria-busy={loading}>
-              <ResultPanel
-                result={result}
-                loading={loading}
-                networkError={networkError}
-                request={lastRequest}
-                onCandidate={chooseCandidate}
-              />
-              <PipelinePanel result={result} loading={loading} request={lastRequest} />
-            </div>
-          </section>
+          ) : (
+            <AdminUsersPanel currentUserId={session.userId} />
+          )}
         </main>
 
         <footer className="portal-footer">
           <span>Hệ thống tra cứu tổ chức BCA / BQP</span>
-          <span>Nguồn đối chiếu: Master Registry · Exact + Conservative Fuzzy</span>
+          <span>Nguồn dữ liệu: Danh mục tổ chức BCA/BQP · Ưu tiên khớp chính xác</span>
         </footer>
       </div>
     </div>
   );
 }
 
-function BatchUploadPanel() {
+interface BatchTransactionEvent {
+  filename: string;
+  summary?: BatchProcessSummary;
+  error?: string;
+}
+
+function BatchUploadPanel({ onTransaction }: { onTransaction: (transaction: BatchTransactionEvent) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [columnName, setColumnName] = useState("");
   const [processing, setProcessing] = useState(false);
@@ -312,9 +497,12 @@ function BatchUploadPanel() {
       setDownload({ url, filename: result.filename });
       setSummary(result.summary);
       triggerDownload(url, result.filename);
+      onTransaction({ filename: file.name, summary: result.summary });
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
-      setError(caught instanceof Error ? caught.message : "Không thể xử lý file.");
+      const message = caught instanceof Error ? caught.message : "Không thể xử lý file.";
+      setError(message);
+      onTransaction({ filename: file.name, error: message });
     } finally {
       if (!controller.signal.aborted) setProcessing(false);
     }
@@ -325,7 +513,7 @@ function BatchUploadPanel() {
       <div className="batch-heading">
         <div className="batch-title-block">
           <span className="batch-icon"><GoogleIcon name="upload_file" size={25} /></span>
-          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel / PDF</h2><p>Kết quả là ZIP gồm hai danh sách.</p></div>
+          <div><span className="section-code">ĐỐI CHIẾU HÀNG LOẠT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel / PDF</h2><p>Kết quả là tệp ZIP gồm hai danh sách.</p></div>
         </div>
         <span className="batch-limit">TỐI ĐA 10 MB · 5.000 DÒNG</span>
       </div>
@@ -362,7 +550,7 @@ function BatchUploadPanel() {
           ) : summary ? (
             <>
               <GoogleIcon name="task_alt" size={21} filled />
-              <div><strong>Đã xử lý {formatNumber(summary.inputCount)} dòng</strong><span>{formatNumber(summary.paidCount)} được trả lương · {formatNumber(summary.notPaidCount)} không được trả lương · {formatNumber(summary.unresolvedCount)} chưa thể kết luận · Nguồn: {summary.inputMode === "gemini-ocr" ? "Gemini 2.5 Flash" : summary.inputMode === "pdf-text" ? "PDF text" : summary.inputMode}</span></div>
+              <div><strong>Đã xử lý {formatNumber(summary.inputCount)} dòng</strong><span>{formatNumber(summary.paidCount)} được trả lương · {formatNumber(summary.notPaidCount)} không được trả lương · {formatNumber(summary.unresolvedCount)} chưa thể kết luận · Phương thức đọc: {summary.inputMode === "gemini-ocr" ? "Nhận dạng văn bản trong tài liệu" : summary.inputMode === "pdf-text" ? "Văn bản có sẵn trong PDF" : "Dữ liệu bảng"}</span></div>
               {download && <button type="button" onClick={() => triggerDownload(download.url, download.filename)}><GoogleIcon name="download" size={18} /> Tải lại ZIP</button>}
             </>
           ) : null}
@@ -372,19 +560,39 @@ function BatchUploadPanel() {
   );
 }
 
-function Sidebar({ stats }: { stats: RegistryStats }) {
+interface SidebarProps {
+  stats: RegistryStats;
+  activeView: PortalView;
+  historyCount: number;
+  isAdmin: boolean;
+  onNavigate: (view: PortalView) => void;
+}
+
+function Sidebar({ stats, activeView, historyCount, isAdmin, onNavigate }: SidebarProps) {
   return (
     <aside className="portal-sidebar">
       <div className="sidebar-brand">
         <span className="brand-seal"><GoogleIcon name="account_balance" size={26} filled /></span>
-        <div><strong>Định danh tổ chức</strong><span>BCA · BQP REGISTRY</span></div>
+        <div><strong>Định danh tổ chức</strong><span>HỆ THỐNG BCA · BQP</span></div>
       </div>
 
       <div className="sidebar-section">
-        <span className="sidebar-label">Chức năng đang sử dụng</span>
-        <div className="active-module"><GoogleIcon name="manage_search" size={20} /><span>Tra cứu tổ chức</span><i>01</i></div>
+        <span className="sidebar-label">Chức năng hệ thống</span>
+        <nav className="sidebar-navigation">
+          <button type="button" className={activeView === "search" ? "active-module" : ""} onClick={() => onNavigate("search")}><GoogleIcon name="manage_search" size={20} /><span>Tra cứu tổ chức</span><i>01</i></button>
+          <button type="button" className={activeView === "history" ? "active-module" : ""} onClick={() => onNavigate("history")}><GoogleIcon name="history" size={20} /><span>Lịch sử tra cứu</span><i>{historyCount}</i></button>
+          {isAdmin && <button type="button" className={activeView === "users" ? "active-module" : ""} onClick={() => onNavigate("users")}><GoogleIcon name="manage_accounts" size={20} /><span>Quản lý người dùng</span><i>QT</i></button>}
+        </nav>
       </div>
 
+      <div className="sidebar-section registry-summary">
+        <span className="sidebar-label">Dữ liệu hệ thống</span>
+        <dl>
+          <div><dt>Tổng tổ chức</dt><dd>{formatNumber(stats.total)}</dd></div>
+          <div><dt>Phạm vi BCA</dt><dd>{formatNumber(stats.bca)}</dd></div>
+          <div><dt>Phạm vi BQP</dt><dd>{formatNumber(stats.bqp)}</dd></div>
+        </dl>
+      </div>
 
       <div className="sidebar-process">
         <span className="sidebar-label">Quy trình xác thực</span>
@@ -397,7 +605,7 @@ function Sidebar({ stats }: { stats: RegistryStats }) {
 
       <div className="sidebar-footer">
         <span className="runtime-dot" />
-        <div><strong>Safe matching</strong><small>Exact ưu tiên · Fuzzy có ngưỡng</small></div>
+        <div><strong>Đối chiếu an toàn</strong><small>Ưu tiên chính xác · Gần đúng khi đủ tin cậy</small></div>
       </div>
     </aside>
   );
@@ -429,7 +637,7 @@ function SearchPanel(props: SearchPanelProps) {
   return (
     <section className="desk-panel query-panel" aria-labelledby="query-title">
       <div className="panel-caption">
-        <div><span className="panel-index">01</span><div><span className="section-code">QUERY PARAMETERS</span><h2 id="query-title">Điều kiện tra cứu</h2></div></div>
+        <div><span className="panel-index">01</span><div><span className="section-code">THÔNG TIN ĐỐI CHIẾU</span><h2 id="query-title">Điều kiện tra cứu</h2></div></div>
         <span className="required-note"><i>*</i> Bắt buộc</span>
       </div>
 
@@ -460,7 +668,7 @@ function SearchPanel(props: SearchPanelProps) {
         </div>
 
         <div className="query-section context-section">
-          <div className="query-section-title"><span>B</span><strong>Ngữ cảnh phân giải</strong></div>
+          <div className="query-section-title"><span>B</span><strong>Thông tin bổ sung</strong></div>
           <div className="form-field">
             <label htmlFor="province">Tỉnh / Thành phố</label>
             <select id="province" value={province} onChange={(event) => onProvince(event.target.value)}>
@@ -487,7 +695,7 @@ function SearchPanel(props: SearchPanelProps) {
       </form>
 
       <div className="sample-queries">
-        <div className="sample-heading"><span>Truy vấn mẫu</span><small>Chọn để kiểm tra nhanh giao diện</small></div>
+        <div className="sample-heading"><span>Truy vấn mẫu</span><small>Chọn một mục để tra cứu nhanh</small></div>
         <div className="sample-list">
           {EXAMPLES.map((example, index) => (
             <button type="button" key={example} onClick={() => onExample(example)}>
@@ -514,8 +722,8 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
   if (networkError) {
     return (
       <section className="desk-panel output-panel state-output error-output">
-        <OutputCaption status="ERR" title="Kết quả định danh" />
-        <div className="state-message"><span><GoogleIcon name="cloud_off" size={28} /></span><div><small>LỖI KẾT NỐI</small><h2>Chưa thể truy cập dịch vụ tra cứu</h2><p>{networkError}. Kiểm tra lại cấu hình API hoặc thử lại sau.</p></div></div>
+        <OutputCaption status="LỖI" title="Kết quả định danh" />
+        <div className="state-message"><span><GoogleIcon name="cloud_off" size={28} /></span><div><small>LỖI KẾT NỐI</small><h2>Chưa thể truy cập dịch vụ tra cứu</h2><p>{networkError}. Kiểm tra lại kết nối máy chủ hoặc thử lại sau.</p></div></div>
       </section>
     );
   }
@@ -523,12 +731,12 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
   if (!result) {
     return (
       <section className="desk-panel output-panel initial-output">
-        <OutputCaption status="---" title="Kết quả định danh" />
+        <OutputCaption status="CHỜ" title="Kết quả định danh" />
         <div className="initial-sheet">
           <span className="sheet-mark">BCA / BQP</span>
-          <div className="sheet-copy"><span className="section-code">AWAITING QUERY</span><h2>Chưa có yêu cầu tra cứu</h2><p>Nhập tên hoặc mã tổ chức tại biểu mẫu bên trái. Phiếu kết quả ưu tiên kết luận đơn vị trả lương, sau đó hiển thị cơ quan quản lý.</p></div>
+          <div className="sheet-copy"><span className="section-code">CHỜ THÔNG TIN TRA CỨU</span><h2>Chưa có yêu cầu tra cứu</h2><p>Nhập tên hoặc mã tổ chức tại biểu mẫu bên trái. Phiếu kết quả ưu tiên kết luận đơn vị trả lương, sau đó hiển thị cơ quan quản lý.</p></div>
           <ol className="comparison-rules">
-            <li><span>01</span><div><strong>Đối chiếu định danh</strong><small>ID, tên chính thức, tên chuẩn hóa và alias</small></div></li>
+            <li><span>01</span><div><strong>Đối chiếu định danh</strong><small>Mã, tên chính thức, tên chuẩn hóa và tên gọi khác</small></div></li>
             <li><span>02</span><div><strong>Kiểm tra ngữ cảnh</strong><small>Địa phương và loại hình tổ chức</small></div></li>
             <li><span>03</span><div><strong>Tra cứu kết luận</strong><small>Đơn vị trả lương trước, phạm vi quản lý sau</small></div></li>
           </ol>
@@ -541,7 +749,7 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
     const isFuzzyReview = result.match_status === "FUZZY_CANDIDATES";
     return (
       <section className="desk-panel output-panel ambiguous-output">
-        <OutputCaption status="REV" title="Kết quả cần rà soát" />
+        <OutputCaption status="RÀ SOÁT" title="Kết quả cần rà soát" />
         <div className="output-alert warning-alert"><GoogleIcon name="warning" size={23} filled /><div><strong>Chưa thể kết luận đơn vị trả lương và cơ quan quản lý</strong><span>{isFuzzyReview ? `${result.candidates?.length || 0} ứng viên gần đúng được tìm thấy. Hãy chọn đúng tổ chức.` : `${result.candidates?.length || 0} bản ghi có cùng tên. Chọn đúng địa phương hoặc bổ sung bộ lọc.`}</span></div></div>
         <div className="candidate-table" role="list">
           <div className="candidate-table-head"><span>Tổ chức</span><span>Địa phương</span><span>Mã định danh</span><span /></div>
@@ -562,8 +770,8 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
     const invalid = result.match_status === "INVALID_INPUT";
     return (
       <section className="desk-panel output-panel state-output not-found-output">
-        <OutputCaption status="N/A" title="Kết quả định danh" />
-        <div className="state-message"><span><GoogleIcon name="search_off" size={29} /></span><div><small>{invalid ? "INVALID INPUT" : "NO SAFE MATCH"}</small><h2>{invalid ? "Yêu cầu tra cứu chưa hợp lệ" : "Không tìm thấy bản ghi đủ tin cậy"}</h2><p>{invalid ? result.errors?.join(" ") : result.reason === "DETERMINISTIC_MATCH_CONTEXT_MISMATCH" ? "Tên tổ chức tồn tại nhưng mâu thuẫn với địa phương hoặc loại tổ chức đã chọn." : `Master Registry không có bản ghi Exact/Fuzzy đủ an toàn cho “${request?.organization_name || request?.organization_id || "truy vấn này"}”.`}</p><strong className="unknown-label">KẾT LUẬN: UNKNOWN</strong></div></div>
+        <OutputCaption status="KHÔNG CÓ" title="Kết quả định danh" />
+        <div className="state-message"><span><GoogleIcon name="search_off" size={29} /></span><div><small>{invalid ? "DỮ LIỆU CHƯA HỢP LỆ" : "CHƯA CÓ KẾT QUẢ TIN CẬY"}</small><h2>{invalid ? "Yêu cầu tra cứu chưa hợp lệ" : "Không tìm thấy bản ghi đủ tin cậy"}</h2><p>{invalid ? result.errors?.join(" ") : result.reason === "DETERMINISTIC_MATCH_CONTEXT_MISMATCH" ? "Tên tổ chức tồn tại nhưng mâu thuẫn với địa phương hoặc loại tổ chức đã chọn." : `Danh mục tổ chức chưa có kết quả đủ tin cậy cho “${request?.organization_name || request?.organization_id || "truy vấn này"}”.`}</p><strong className="unknown-label">KẾT LUẬN: CHƯA XÁC ĐỊNH</strong></div></div>
       </section>
     );
   }
@@ -575,7 +783,7 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
 
   return (
     <section className={`desk-panel output-panel resolved-output ${isBca ? "result-bca" : "result-bqp"}`}>
-      <OutputCaption status="OK" title="Phiếu kết quả định danh" />
+      <OutputCaption status="HOÀN TẤT" title="Phiếu kết quả định danh" />
       <div className="verified-banner"><span><GoogleIcon name="verified" size={18} filled /> ĐÃ XÁC THỰC</span><strong>{STATUS_LABELS[result.match_status]}</strong><small>Độ tin cậy {result.match_score || 100}%</small></div>
 
       <div className="identity-heading">
@@ -610,15 +818,15 @@ function ResultPanel({ result, loading, networkError, request, onCandidate }: Re
 }
 
 function OutputCaption({ status, title }: { status: string; title: string }) {
-  return <div className="panel-caption output-caption"><div><span className="panel-index">02</span><div><span className="section-code">RESOLUTION OUTPUT</span><h2>{title}</h2></div></div><span className="output-code">{status}</span></div>;
+  return <div className="panel-caption output-caption"><div><span className="panel-index">02</span><div><span className="section-code">KẾT QUẢ ĐỐI CHIẾU</span><h2>{title}</h2></div></div><span className="output-code">{status}</span></div>;
 }
 
 function LoadingResult() {
   return (
     <section className="desk-panel output-panel loading-output">
-      <OutputCaption status="RUN" title="Đang xử lý yêu cầu" />
+      <OutputCaption status="ĐANG XỬ LÝ" title="Đang xử lý yêu cầu" />
       <div className="loading-ledger">
-        <div className="loading-status"><span className="spinner dark-spinner" /><div><strong>Đang đối chiếu Master Registry</strong><small>Vui lòng giữ nguyên điều kiện tra cứu...</small></div></div>
+        <div className="loading-status"><span className="spinner dark-spinner" /><div><strong>Đang đối chiếu danh mục tổ chức</strong><small>Vui lòng giữ nguyên điều kiện tra cứu...</small></div></div>
         {[68, 91, 76, 84, 60].map((width, index) => <span className="ledger-line" style={{ width: `${width}%` }} key={index} />)}
       </div>
     </section>
@@ -632,17 +840,17 @@ function PipelinePanel({ result, loading, request }: { result: SearchResponse | 
   const finished = Boolean(result);
 
   const steps = useMemo(() => [
-    { code: "IN", title: "Tiếp nhận truy vấn", value: query || "Chưa có dữ liệu", state: request ? "done" : "idle" },
-    { code: "NM", title: "Chuẩn hóa tên", value: request ? normalizePreview(query) || "Bỏ qua khi tra bằng ID" : "—", state: request ? "done" : "idle" },
-    { code: "SK", title: "Sinh khóa tìm kiếm", value: request ? searchKeyPreview(query) || "Tra cứu khóa ID" : "—", state: request ? "done" : "idle" },
-    { code: "ER", title: "Phân giải thực thể", value: loading ? "Đang đối chiếu" : isResolved ? STATUS_LABELS[result!.match_status] : isAmbiguous ? "Yêu cầu xác nhận ứng viên" : finished ? "Không có khớp đủ an toàn" : "—", state: loading ? "active" : isResolved ? "done" : finished ? "failed" : "idle" },
-    { code: "PR", title: "Tra cứu trả lương", value: isResolved ? `${result!.paying_organization || "Chưa xác định cụ thể"} · ${result!.payroll_status || "Chưa có trạng thái"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
-    { code: "MG", title: "Tra cứu quản lý", value: isResolved ? `${result!.management} · ${result!.management === "BCA" ? "Bộ Công an" : "Bộ Quốc phòng"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
+    { code: "01", title: "Tiếp nhận truy vấn", value: query || "Chưa có dữ liệu", state: request ? "done" : "idle" },
+    { code: "02", title: "Chuẩn hóa tên", value: request ? normalizePreview(query) || "Bỏ qua khi tra bằng mã" : "—", state: request ? "done" : "idle" },
+    { code: "03", title: "Tạo khóa tìm kiếm", value: request ? searchKeyPreview(query) || "Tra cứu theo mã" : "—", state: request ? "done" : "idle" },
+    { code: "04", title: "Đối chiếu tổ chức", value: loading ? "Đang đối chiếu" : isResolved ? STATUS_LABELS[result!.match_status] : isAmbiguous ? "Cần xác nhận kết quả" : finished ? "Chưa có kết quả đủ tin cậy" : "—", state: loading ? "active" : isResolved ? "done" : finished ? "failed" : "idle" },
+    { code: "05", title: "Tra cứu trả lương", value: isResolved ? `${result!.paying_organization || "Chưa xác định cụ thể"} · ${result!.payroll_status || "Chưa có trạng thái"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
+    { code: "06", title: "Tra cứu quản lý", value: isResolved ? `${result!.management} · ${result!.management === "BCA" ? "Bộ Công an" : "Bộ Quốc phòng"}` : finished ? "Không kết luận" : "—", state: isResolved ? "done" : finished ? "failed" : "idle" },
   ], [finished, isAmbiguous, isResolved, loading, query, request, result]);
 
   return (
     <section className="desk-panel audit-panel">
-      <div className="audit-heading"><div><span className="section-code">PROCESS AUDIT</span><h2>Dấu vết xử lý</h2></div><span>06 GIAI ĐOẠN</span></div>
+      <div className="audit-heading"><div><span className="section-code">QUY TRÌNH ĐỐI CHIẾU</span><h2>Các bước xử lý</h2></div><span>06 BƯỚC</span></div>
       <div className="audit-track">
         {steps.map((step, index) => (
           <div className={`audit-step is-${step.state}`} key={step.code}>
