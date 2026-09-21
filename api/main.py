@@ -91,7 +91,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-Gemini-Api-Key"],
+    allow_headers=["Content-Type", "X-Gemini-Api-Key", "Authorization"],
     expose_headers=[
         "Content-Disposition",
         "X-Batch-Input-Count",

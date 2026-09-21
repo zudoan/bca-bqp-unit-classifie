@@ -78,6 +78,7 @@ class UserResponse(BaseModel):
 
 class AuthenticationResponse(BaseModel):
     user: UserResponse
+    token: str | None = None
 
 
 def _normalize_username(value: str) -> str:
@@ -122,13 +123,16 @@ def _create_user_session(database: Session, user: User, remember: bool) -> tuple
 
 
 def _set_session_cookie(response: Response, token: str, max_age: int | None) -> None:
+    is_render = bool(os.getenv("RENDER"))
+    secure = COOKIE_SECURE or is_render
+    samesite = "none" if secure else "lax"
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         max_age=max_age,
         httponly=True,
-        secure=COOKIE_SECURE,
-        samesite="lax",
+        secure=secure,
+        samesite=samesite,
         path="/",
     )
 
@@ -138,6 +142,10 @@ def require_current_user(
     database: Session = Depends(get_database),
 ) -> User:
     token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập không tồn tại.")
 
@@ -186,7 +194,7 @@ def register(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tên đăng nhập hoặc email đã được sử dụng.") from error
 
     _set_session_cookie(response, token, max_age)
-    return AuthenticationResponse(user=UserResponse.model_validate(user))
+    return AuthenticationResponse(user=UserResponse.model_validate(user), token=token)
 
 
 @router.post("/login", response_model=AuthenticationResponse)
@@ -206,7 +214,7 @@ def login(
     database.commit()
     database.refresh(user)
     _set_session_cookie(response, token, max_age)
-    return AuthenticationResponse(user=UserResponse.model_validate(user))
+    return AuthenticationResponse(user=UserResponse.model_validate(user), token=token)
 
 
 @router.get("/me", response_model=AuthenticationResponse)
