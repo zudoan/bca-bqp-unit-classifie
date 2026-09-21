@@ -7,6 +7,16 @@ services:
     container_name: bca-bqp-backend
     ports:
       - "7860:7860"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Google AI Studio Gemini API. Keep GEMINI_API_KEY outside source control.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_API_URL: ${GEMINI_API_URL:-https://generativelanguage.googleapis.com/v1beta}
+      GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-300}
+      GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-32768}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=5).read()"]

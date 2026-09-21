@@ -11,6 +11,7 @@ import html
 import pandas as pd
 import gradio as gr
 
+from matching.acronym_match import AcronymMatcher
 from matching.repository import InMemoryOrganizationRepository
 from matching.resolver import MatchingConfig
 from search.organization_search import OrganizationSearchService
@@ -20,6 +21,7 @@ from preprocessing.normalize import normalize_name, to_search_key
 _PROJECT_ROOT = Path(__file__).resolve().parent
 DATASET_PATH = _PROJECT_ROOT / "data" / "dataset.csv"
 ALIASES_PATH = _PROJECT_ROOT / "data" / "aliases.csv"
+ACRONYMS_PATH = _PROJECT_ROOT / "data" / "acronym.csv"
 
 print("[INFO] Loading dataset into memory...")
 df = pd.read_csv(DATASET_PATH, dtype=str, keep_default_na=False)
@@ -30,6 +32,11 @@ if ALIASES_PATH.is_file():
     aliases = pd.read_csv(ALIASES_PATH, dtype=str, keep_default_na=False).to_dict("records")
 
 repo = InMemoryOrganizationRepository(rows, aliases)
+acronym_matcher = (
+    AcronymMatcher.from_csv(repo, ACRONYMS_PATH)
+    if ACRONYMS_PATH.is_file()
+    else None
+)
 
 total_orgs = len(df)
 bca_count = int((df["management"] == "BCA").sum())
@@ -69,6 +76,7 @@ STATUS_INFO = {
     "NORMALIZED_MATCH": "Khớp tên sau chuẩn hóa",
     "SEARCH_KEY_MATCH": "Khớp không dấu (Search Key)",
     "ALIAS_MATCH": "Khớp tên viết tắt / Tên gọi khác",
+    "ACRONYM_MATCH": "Khớp tên viết tắt từ bộ dữ liệu acronym",
     "FUZZY_MATCH": "Khớp gần đúng có độ tin cậy cao",
     "FUZZY_CANDIDATES": "Ứng viên gần đúng cần xác nhận",
     "RESOLVED": "Khớp chính xác",
@@ -112,7 +120,7 @@ def search_organization_ui(org_name, org_id, province, org_type):
         """
 
     config = MatchingConfig()
-    service = OrganizationSearchService(repo, config)
+    service = OrganizationSearchService(repo, config, acronym_matcher)
 
     res = service.search_organization(
         organization_id=org_id or None,

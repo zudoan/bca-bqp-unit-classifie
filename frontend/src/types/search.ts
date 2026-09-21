@@ -6,6 +6,7 @@ export type MatchStatus =
   | "NORMALIZED_MATCH"
   | "SEARCH_KEY_MATCH"
   | "ALIAS_MATCH"
+  | "ACRONYM_MATCH"
   | "FUZZY_MATCH"
   | "FUZZY_CANDIDATES"
   | "AMBIGUOUS_MATCH"
@@ -57,6 +58,7 @@ export interface BatchProcessSummary {
   paidCount: number;
   notPaidCount: number;
   unresolvedCount: number;
+  inputMode: "excel" | "word" | "pdf-text" | "gemini-ocr" | string;
 }
 
 export interface BatchProcessResult {

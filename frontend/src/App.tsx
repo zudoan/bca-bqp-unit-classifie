@@ -56,6 +56,7 @@ const STATUS_LABELS: Record<string, string> = {
   NORMALIZED_MATCH: "Khớp tên sau chuẩn hóa",
   SEARCH_KEY_MATCH: "Khớp khóa tìm kiếm không dấu",
   ALIAS_MATCH: "Khớp tên viết tắt / tên gọi khác",
+  ACRONYM_MATCH: "Khớp tên viết tắt từ bộ dữ liệu acronym",
   FUZZY_MATCH: "Khớp gần đúng có độ tin cậy cao",
   FUZZY_CANDIDATES: "Các ứng viên gần đúng cần xác nhận",
   AMBIGUOUS_MATCH: "Nhiều tổ chức cùng thỏa điều kiện",
@@ -263,9 +264,9 @@ function BatchUploadPanel() {
       return;
     }
     const extension = selected.name.split(".").pop()?.toLowerCase();
-    if (!extension || !["xlsx", "xls", "docx"].includes(extension)) {
+    if (!extension || !["xlsx", "xls", "docx", "pdf"].includes(extension)) {
       setFile(null);
-      setError("Chỉ hỗ trợ file .xlsx, .xls hoặc .docx.");
+      setError("Chỉ hỗ trợ file .xlsx, .xls, .docx hoặc .pdf.");
       return;
     }
     if (selected.size > 10 * 1024 * 1024) {
@@ -324,7 +325,7 @@ function BatchUploadPanel() {
       <div className="batch-heading">
         <div className="batch-title-block">
           <span className="batch-icon"><GoogleIcon name="upload_file" size={25} /></span>
-          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel</h2><p>Tải một lần, nhận ZIP gồm hai file: đơn vị được trả lương và đơn vị không được trả lương.</p></div>
+          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel / PDF</h2><p>PDF có lớp văn bản được đọc nội bộ; PDF scan được nhận dạng bằng Gemini 2.5 Flash. Kết quả là ZIP gồm hai danh sách.</p></div>
         </div>
         <span className="batch-limit">TỐI ĐA 10 MB · 5.000 DÒNG</span>
       </div>
@@ -337,9 +338,9 @@ function BatchUploadPanel() {
           onDragLeave={() => setDragActive(false)}
           onDrop={onDrop}
         >
-          <input type="file" accept=".xlsx,.xls,.docx" onChange={onFileChange} />
+          <input type="file" accept=".xlsx,.xls,.docx,.pdf,application/pdf" onChange={onFileChange} />
           <GoogleIcon name={file ? "description" : "cloud_upload"} size={29} />
-          <span><strong>{file ? file.name : "Chọn hoặc kéo thả file vào đây"}</strong><small>{file ? `${(file.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 0 })} KB` : "Excel .xlsx/.xls hoặc Word .docx"}</small></span>
+          <span><strong>{file ? file.name : "Chọn hoặc kéo thả file vào đây"}</strong><small>{file ? `${(file.size / 1024).toLocaleString("vi-VN", { maximumFractionDigits: 0 })} KB` : "Excel .xlsx/.xls, Word .docx hoặc PDF .pdf"}</small></span>
         </label>
 
         <div className="batch-column-field">
@@ -354,7 +355,7 @@ function BatchUploadPanel() {
         </button>
       </form>
 
-      <div className="batch-note"><GoogleIcon name="verified_user" size={17} /><span>Các dòng fuzzy chưa đủ chắc chắn được giữ ở phụ lục “Chưa thể kết luận”, không bị gán nhầm vào nhóm không được trả lương.</span></div>
+      <div className="batch-note"><GoogleIcon name="verified_user" size={17} /><span>Chỉ PDF scan không đủ lớp văn bản mới được gửi tới Gemini API. Các dòng fuzzy chưa đủ chắc chắn vẫn nằm trong phụ lục “Chưa thể kết luận”.</span></div>
 
       {(error || summary) && (
         <div className={`batch-feedback ${error ? "is-error" : "is-success"}`} aria-live="polite">
@@ -363,7 +364,7 @@ function BatchUploadPanel() {
           ) : summary ? (
             <>
               <GoogleIcon name="task_alt" size={21} filled />
-              <div><strong>Đã xử lý {formatNumber(summary.inputCount)} dòng</strong><span>{formatNumber(summary.paidCount)} được trả lương · {formatNumber(summary.notPaidCount)} không được trả lương · {formatNumber(summary.unresolvedCount)} chưa thể kết luận</span></div>
+              <div><strong>Đã xử lý {formatNumber(summary.inputCount)} dòng</strong><span>{formatNumber(summary.paidCount)} được trả lương · {formatNumber(summary.notPaidCount)} không được trả lương · {formatNumber(summary.unresolvedCount)} chưa thể kết luận · Nguồn: {summary.inputMode === "gemini-ocr" ? "Gemini 2.5 Flash" : summary.inputMode === "pdf-text" ? "PDF text" : summary.inputMode}</span></div>
               {download && <button type="button" onClick={() => triggerDownload(download.url, download.filename)}><GoogleIcon name="download" size={18} /> Tải lại ZIP</button>}
             </>
           ) : null}

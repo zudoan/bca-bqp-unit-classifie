@@ -18,6 +18,7 @@ from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from preprocessing.normalize import to_search_key
 from search.organization_search import OrganizationSearchService
+from search.pdf_processing import OcrProvider, read_pdf_organizations
 
 
 MAX_BATCH_ROWS = 5_000
@@ -68,6 +69,7 @@ class BatchArtifact:
     paid_count: int
     not_paid_count: int
     unresolved_count: int
+    input_mode: str
 
 
 def process_batch_file(
@@ -75,8 +77,9 @@ def process_batch_file(
     content: bytes,
     service: OrganizationSearchService,
     column_name: str | None = None,
+    ocr_provider: OcrProvider | None = None,
 ) -> BatchArtifact:
-    """Read a Word/Excel list, classify rows, and return two reports in a ZIP."""
+    """Read a Word/Excel/PDF list, classify rows, and return two reports in a ZIP."""
 
     if not filename:
         raise BatchProcessingError("Tên file không hợp lệ.")
@@ -84,9 +87,9 @@ def process_batch_file(
         raise BatchProcessingError("File tải lên đang trống.")
 
     extension = Path(filename).suffix.lower()
-    if extension not in {".xlsx", ".xls", ".docx"}:
+    if extension not in {".xlsx", ".xls", ".docx", ".pdf"}:
         raise BatchProcessingError(
-            "Chỉ hỗ trợ file Excel .xlsx/.xls hoặc Word .docx."
+            "Chỉ hỗ trợ file Excel .xlsx/.xls, Word .docx hoặc PDF .pdf."
         )
     if extension in {".xlsx", ".docx"}:
         _validate_office_archive(content)
@@ -94,9 +97,19 @@ def process_batch_file(
     if extension in {".xlsx", ".xls"}:
         inputs = _read_excel(content, extension, column_name)
         output_extension = ".xlsx"
-    else:
+        input_mode = "excel"
+    elif extension == ".docx":
         inputs = _read_word(content, column_name)
         output_extension = ".docx"
+        input_mode = "word"
+    else:
+        extraction = read_pdf_organizations(content, column_name, ocr_provider)
+        inputs = tuple(
+            InputOrganization(item.source, item.source_row, item.organization_name)
+            for item in extraction.organizations
+        )
+        output_extension = ".xlsx"
+        input_mode = extraction.input_mode
 
     if not inputs:
         raise BatchProcessingError(
@@ -157,6 +170,7 @@ def process_batch_file(
         paid_count=len(paid),
         not_paid_count=len(not_paid),
         unresolved_count=len(unresolved),
+        input_mode=input_mode,
     )
 
 

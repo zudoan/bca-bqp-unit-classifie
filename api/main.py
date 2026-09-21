@@ -14,20 +14,28 @@ from typing import Optional
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from matching.acronym_match import AcronymMatcher
 from matching.repository import InMemoryOrganizationRepository
 from matching.resolver import MatchingConfig
 from search.batch_processing import BatchProcessingError, process_batch_file
 from search.organization_search import OrganizationSearchService
+from search.pdf_processing import (
+    GeminiOcrProvider,
+    OcrConfigurationError,
+    OcrUpstreamError,
+    PdfProcessingError,
+)
 
 _ROOT = Path(__file__).resolve().parent.parent
 DATASET_PATH = _ROOT / "data" / "dataset.csv"
 ALIASES_PATH = _ROOT / "data" / "aliases.csv"
+ACRONYMS_PATH = _ROOT / "data" / "acronym.csv"
 
 df = pd.read_csv(DATASET_PATH, dtype=str, keep_default_na=False)
 rows = df.to_dict("records")
@@ -37,7 +45,15 @@ aliases = (
     else []
 )
 repo = InMemoryOrganizationRepository(rows, aliases)
-service = OrganizationSearchService(repo, MatchingConfig())
+acronym_matcher = (
+    AcronymMatcher.from_csv(repo, ACRONYMS_PATH)
+    if ACRONYMS_PATH.is_file()
+    else None
+)
+service = OrganizationSearchService(
+    repo, MatchingConfig(), acronym_matcher
+)
+ocr_provider = GeminiOcrProvider.from_environment()
 
 app = FastAPI(
     title="BCA/BQP Organization Registry API",
@@ -62,13 +78,14 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Gemini-Api-Key"],
     expose_headers=[
         "Content-Disposition",
         "X-Batch-Input-Count",
         "X-Batch-Paid-Count",
         "X-Batch-Not-Paid-Count",
         "X-Batch-Unresolved-Count",
+        "X-Batch-Input-Mode",
     ],
 )
 
@@ -82,7 +99,17 @@ class SearchRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "total_organizations": len(df)}
+    return {
+        "status": "ok",
+        "total_organizations": len(df),
+        "acronym_aliases": (
+            acronym_matcher.alias_count if acronym_matcher else 0
+        ),
+        "ocr": {
+            "engine": "gemini-2.5-flash",
+            "configured": bool(ocr_provider.api_key),
+        },
+    }
 
 
 @app.post("/api/v1/organizations/search")
@@ -115,7 +142,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 @app.post(
     "/api/v1/organizations/batch",
-    summary="Phân loại danh sách đơn vị từ Excel hoặc Word",
+    summary="Phân loại danh sách đơn vị từ Excel, Word hoặc PDF",
     responses={
         200: {
             "content": {"application/zip": {}},
@@ -126,6 +153,8 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 async def batch_search(
     file: UploadFile = File(...),
     column_name: Optional[str] = Form(None, max_length=128),
+    gemini_api_key: Optional[str] = Form(None),
+    x_gemini_api_key: Optional[str] = Header(None, alias="X-Gemini-Api-Key"),
 ):
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     await file.close()
@@ -135,6 +164,17 @@ async def batch_search(
             detail="File vượt giới hạn 10 MB.",
         )
 
+    active_ocr = ocr_provider
+    client_key = (x_gemini_api_key or gemini_api_key or "").strip()
+    if client_key:
+        active_ocr = GeminiOcrProvider(
+            api_key=client_key,
+            model=ocr_provider.model,
+            api_url=ocr_provider.api_url,
+            timeout=ocr_provider.timeout,
+            max_output_tokens=ocr_provider.max_output_tokens,
+        )
+
     try:
         artifact = await run_in_threadpool(
             process_batch_file,
@@ -142,7 +182,14 @@ async def batch_search(
             content,
             service,
             column_name.strip() if column_name and column_name.strip() else None,
+            active_ocr,
         )
+    except OcrConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except OcrUpstreamError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except PdfProcessingError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except BatchProcessingError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -155,6 +202,7 @@ async def batch_search(
         "X-Batch-Paid-Count": str(artifact.paid_count),
         "X-Batch-Not-Paid-Count": str(artifact.not_paid_count),
         "X-Batch-Unresolved-Count": str(artifact.unresolved_count),
+        "X-Batch-Input-Mode": artifact.input_mode,
     }
     return StreamingResponse(
         BytesIO(artifact.archive),

@@ -5,6 +5,7 @@ from __future__ import annotations
 from threading import RLock
 from typing import Any
 
+from matching.acronym_match import AcronymMatcher
 from matching.models import MatchCandidate, MatchResolution, MatchStatus
 from matching.repository import OrganizationRepository
 from matching.resolver import MatchingConfig, OrganizationResolver
@@ -19,9 +20,12 @@ class OrganizationSearchService:
         self,
         repository: OrganizationRepository,
         matching_config: MatchingConfig | None = None,
+        acronym_matcher: AcronymMatcher | None = None,
     ) -> None:
         self.repository = repository
-        self.resolver = OrganizationResolver(repository, matching_config)
+        self.resolver = OrganizationResolver(
+            repository, matching_config, acronym_matcher
+        )
 
     def search_organization(
         self,
@@ -124,10 +128,13 @@ _default_service_lock = RLock()
 def configure_repository(
     repository: OrganizationRepository,
     matching_config: MatchingConfig | None = None,
+    acronym_matcher: AcronymMatcher | None = None,
 ) -> OrganizationSearchService:
     """Configure the process-wide facade and return the created service."""
 
-    service = OrganizationSearchService(repository, matching_config)
+    service = OrganizationSearchService(
+        repository, matching_config, acronym_matcher
+    )
     configure_search_service(service)
     return service
 

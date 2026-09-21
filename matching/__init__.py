@@ -1,5 +1,6 @@
 """Organization entity-resolution engine."""
 
+from .acronym_match import AcronymDatasetError, AcronymMatcher
 from .models import (
     AliasRecord,
     MatchCandidate,
@@ -15,6 +16,8 @@ from .repository import (
 from .resolver import MatchingConfig, OrganizationResolver
 
 __all__ = [
+    "AcronymDatasetError",
+    "AcronymMatcher",
     "AliasRecord",
     "InMemoryOrganizationRepository",
     "MatchCandidate",

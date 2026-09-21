@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from preprocessing.normalize import to_search_key
 from preprocessing.validate import SearchInput
 
+from .acronym_match import AcronymMatcher
 from .alias_match import AliasMatcher
 from .exact_match import ExactMatcher
 from .fuzzy_match import FuzzyMatcher
@@ -37,12 +38,14 @@ class OrganizationResolver:
         self,
         repository: OrganizationRepository,
         config: MatchingConfig | None = None,
+        acronym_matcher: AcronymMatcher | None = None,
     ) -> None:
         self.repository = repository
         self.config = config or MatchingConfig()
         self.exact_matcher = ExactMatcher(repository)
         self.alias_matcher = AliasMatcher(repository)
         self.fuzzy_matcher = FuzzyMatcher(repository)
+        self.acronym_matcher = acronym_matcher
 
     def resolve(self, request: SearchInput) -> MatchResolution:
         """Run deterministic stages first, then conservative fuzzy retrieval."""
@@ -77,6 +80,17 @@ class OrganizationResolver:
                 alias_matches,
                 request,
             )
+
+        if self.acronym_matcher is not None:
+            acronym_matches = self.acronym_matcher.match(
+                request.organization_name
+            )
+            if acronym_matches:
+                return self._resolve_deterministic_group(
+                    MatchStatus.ACRONYM_MATCH,
+                    acronym_matches,
+                    request,
+                )
 
         if self.config.enable_fuzzy and not self.config.strict_mode:
             fuzzy_candidates = self.fuzzy_matcher.match(

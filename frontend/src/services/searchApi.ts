@@ -279,6 +279,7 @@ export async function processBatchFile(
       paidCount: numberHeader("X-Batch-Paid-Count"),
       notPaidCount: numberHeader("X-Batch-Not-Paid-Count"),
       unresolvedCount: numberHeader("X-Batch-Unresolved-Count"),
+      inputMode: response.headers.get("X-Batch-Input-Mode") || "unknown",
     },
   };
 }

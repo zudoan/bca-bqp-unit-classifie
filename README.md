@@ -41,8 +41,9 @@ flowchart TD
     D2 --> D3["Normalized Name"]
     D3 --> D4["Search Key không dấu"]
     D4 --> D5["Registered Alias"]
+    D5 --> D6["Acronym Dataset"]
 
-    D5 --> E{"Có deterministic match?"}
+    D6 --> E{"Có deterministic match?"}
     E -- "Không" --> F["4. Context-filtered Fuzzy<br/>Canonical name + alias"]
     F --> F1{"Top score ≥ 93<br/>và gap ≥ 5?"}
     F1 -- "Có" --> G["FUZZY_MATCH"]
@@ -68,7 +69,8 @@ flowchart TD
 | 3 | Tên sau chuẩn hóa Unicode/khoảng trắng | `NORMALIZED_MATCH` | 100 |
 | 4 | Search key không dấu | `SEARCH_KEY_MATCH` | 100 |
 | 5 | Tên viết tắt hoặc bí danh đã đăng ký | `ALIAS_MATCH` | 100 |
-| 6 | Fuzzy canonical name/alias | `FUZZY_MATCH` | 93–99.99 |
+| 6 | Tên rút gọn sinh từ `acronym.csv` | `ACRONYM_MATCH` | 100 |
+| 7 | Fuzzy canonical name/alias | `FUZZY_MATCH` | 93–99.99 |
 
 Mã tổ chức chỉ dùng exact match. Hệ thống không fuzzy ID vì một ký tự sai có thể trỏ sang thực thể khác.
 
@@ -106,6 +108,17 @@ Lưu ý: một số dòng chỉ ghi `UBND Địa phương`, `Tranh chấp (Chưa
 
 Alias chính thức được lưu tại `data/aliases.csv`.
 
+Dataset tên rút gọn được lưu tại `data/acronym.csv` với hai cột `alias,label`.
+Khi ứng dụng khởi động, hệ thống đọc file theo kiểu streaming, chuẩn hóa `alias`
+thành search key không dấu và xác thực mọi `label` phải tồn tại chính xác trong
+Organization Registry. Dataset hiện có 547.424 dòng, được khử về 273.712 search
+key duy nhất trỏ tới 13.880 tên chuẩn. Index này chỉ dùng cho deterministic
+matching; các alias sinh tự động không được đưa vào fuzzy candidate pool.
+
+Ví dụ đã hỗ trợ: `Công an TP HCM`, `CA TP HCM`, `Công an HN`, `CA HN`. Nếu một
+alias trỏ đến nhiều tổ chức, hệ thống áp dụng ngữ cảnh tỉnh/thành và loại tổ chức;
+nếu vẫn không duy nhất thì trả `AMBIGUOUS_MATCH`, không tự suy đoán.
+
 ## Cấu trúc dự án
 
 ```text
@@ -114,7 +127,8 @@ manage_bca_bqp/
 │   └── main.py                  # FastAPI endpoints
 ├── data/
 │   ├── dataset.csv              # Master Organization Registry
-│   └── aliases.csv              # Tên viết tắt/bí danh
+│   ├── aliases.csv              # Tên viết tắt/bí danh được quản trị thủ công
+│   └── acronym.csv              # Dataset alias,label sinh cho tên rút gọn
 ├── frontend/                    # React + TypeScript + Vite
 │   ├── src/
 │   │   ├── components/
@@ -128,6 +142,7 @@ manage_bca_bqp/
 ├── matching/
 │   ├── exact_match.py
 │   ├── alias_match.py
+│   ├── acronym_match.py
 │   ├── fuzzy_match.py
 │   ├── models.py
 │   ├── repository.py
@@ -257,11 +272,16 @@ Invoke-RestMethod `
 GET http://localhost:7860/api/v1/organizations/BCA-CENTRAL-000003
 ```
 
-### Phân loại hàng loạt từ Excel / Word
+### Phân loại hàng loạt từ Excel / Word / PDF
 
-Giao diện hỗ trợ kéo-thả file `.xlsx`, `.xls` hoặc `.docx` (tối đa 10 MB và 5.000 dòng). Hệ thống tự nhận diện các tiêu đề thông dụng như `Tên đơn vị`, `Tên tổ chức`, `organization_name`; nếu file có nhiều cột không rõ nghĩa, người dùng có thể nhập chính xác tên cột trên giao diện.
+Giao diện hỗ trợ kéo-thả file `.xlsx`, `.xls`, `.docx` hoặc `.pdf` (tối đa 10 MB, 5.000 dòng và 50 trang PDF). Hệ thống tự nhận diện các tiêu đề thông dụng như `Tên đơn vị`, `Tên tổ chức`, `organization_name`; nếu file có nhiều cột không rõ nghĩa, người dùng có thể nhập chính xác tên cột trên giao diện.
 
-Mỗi tên đơn vị được đưa qua đúng pipeline Exact-first/Fuzzy-safe của tra cứu đơn lẻ. Kết quả tải về là một file ZIP chứa đúng hai file (`.xlsx` cho đầu vào Excel, `.docx` cho đầu vào Word):
+Với PDF, hệ thống tự chọn luồng xử lý:
+
+- PDF có text layer: trích xuất cục bộ bằng `pypdf`/`pdfplumber`, không gửi tài liệu ra dịch vụ OCR.
+- PDF scan hoặc không đủ text: gửi nguyên PDF tới Gemini 2.5 Flash bằng Gemini Developer API để nhận danh sách tên đơn vị có cấu trúc. Giới hạn tải lên của ứng dụng vẫn là 10 MB và 50 trang.
+
+Mỗi tên đơn vị được đưa qua đúng pipeline Exact-first/Fuzzy-safe của tra cứu đơn lẻ. Kết quả tải về là một file ZIP chứa đúng hai file (`.xlsx` cho đầu vào Excel/PDF, `.docx` cho đầu vào Word):
 
 - `*_duoc_tra_luong.xlsx|docx`: các đơn vị đã được định danh duy nhất và có trạng thái `Do BCA trả lương` hoặc `Do BQP trả lương`.
 - `*_khong_duoc_tra_luong.xlsx|docx`: các đơn vị đã được định danh duy nhất và có trạng thái `Không do BCA/BQP trả lương`.
@@ -278,6 +298,30 @@ curl.exe -X POST `
   http://localhost:7860/api/v1/organizations/batch
 ```
 
+#### Cấu hình Gemini 2.5 Flash cho PDF scan & Khởi động 1-Click
+
+Tạo authorization API key cho project tại [Google AI Studio](https://aistudio.google.com/app/apikey). Để đảm bảo an toàn tuyệt đối và trải nghiệm thuận tiện nhất cho người dùng:
+
+- **Khởi động 1-Click tự động (Khuyến nghị):**
+  - **Windows:** Nhấp đúp vào file `start.bat`. Lần đầu khởi động, hệ thống sẽ hỏi bạn nhập Gemini API Key một lần duy nhất và tự động lưu vào file `.env` (file này đã được bảo vệ trong `.gitignore`). Các lần tiếp theo, hệ thống sẽ tự khởi động ngay lập tức mà không cần nhập lại.
+  - **Linux / macOS:** Chạy lệnh `./start.sh`.
+
+- **Cấu hình thủ công qua file `.env`:**
+  ```bash
+  cp .env.example .env
+  # Mở file .env và điền GEMINI_API_KEY=your_key_here
+  docker compose up -d --build
+  ```
+
+- **Truyền key linh hoạt qua Header (Client / In-App):**
+  Endpoint `/api/v1/organizations/batch` hỗ trợ nhận header `X-Gemini-Api-Key` hoặc form field `gemini_api_key`, cho phép người dùng cấu hình key trực tiếp từ giao diện mà không cần khởi động lại dịch vụ backend.
+
+Kiểm tra trạng thái tại `http://localhost:7860/health`. Khi chưa có key, PDF có text vẫn hoạt động bình thường; PDF scan yêu cầu OCR sẽ trả HTTP `503`. Gemini từ chối key, hết quota hoặc lỗi upstream trả HTTP `502`; PDF hỏng, có mật khẩu hoặc quá 50 trang trả HTTP `422`.
+
+> **Bảo mật API Key:** Tuyệt đối không commit file `.env` hoặc ghi cứng API Key vào mã nguồn khi đẩy lên GitHub. Google Secret Scanner và GitHub sẽ tự động phát hiện và vô hiệu hóa (revoke) key ngay lập tức.
+>
+> **Dữ liệu nhạy cảm:** Không gửi tài liệu mật, dữ liệu cá nhân hoặc tài liệu nghiệp vụ BCA/BQP qua Free Tier. Theo điều khoản Gemini Developer API, nội dung của Unpaid Services có thể được dùng để cải thiện sản phẩm và có thể được con người xem xét. Với dữ liệu được phép đưa lên cloud, dùng project đã bật billing/Paid Service, tắt logging không cần thiết và áp dụng quy trình phê duyệt dữ liệu của đơn vị. Nếu cần bảo đảm zero data retention hoặc DPA cấp doanh nghiệp, đánh giá Vertex AI thay cho Google AI Studio.
+
 ### Endpoints
 
 | Method | Endpoint | Mục đích |
@@ -286,7 +330,7 @@ curl.exe -X POST `
 | `POST` | `/api/v1/organizations/search` | Tra cứu bằng JSON body |
 | `GET` | `/api/v1/organizations/search` | Tra cứu bằng query parameters |
 | `GET` | `/api/v1/organizations/{organization_id}` | Lấy bản ghi theo ID |
-| `POST` | `/api/v1/organizations/batch` | Nhận Excel/Word và trả ZIP gồm hai danh sách phân loại |
+| `POST` | `/api/v1/organizations/batch` | Nhận Excel/Word/PDF và trả ZIP gồm hai danh sách phân loại |
 
 ## Trạng thái kết quả
 
@@ -297,6 +341,7 @@ curl.exe -X POST `
 | `NORMALIZED_MATCH` | Khớp sau chuẩn hóa |
 | `SEARCH_KEY_MATCH` | Khớp tên không dấu |
 | `ALIAS_MATCH` | Khớp alias đã đăng ký |
+| `ACRONYM_MATCH` | Khớp deterministic từ `data/acronym.csv` |
 | `FUZZY_MATCH` | Fuzzy đủ ngưỡng tự động phân giải |
 | `FUZZY_CANDIDATES` | Có ứng viên nhưng cần người dùng xác nhận |
 | `AMBIGUOUS_MATCH` | Nhiều deterministic match cùng hợp lệ |
