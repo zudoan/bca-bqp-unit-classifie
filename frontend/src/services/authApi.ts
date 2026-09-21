@@ -39,7 +39,12 @@ function toPortalSession(user: BackendUser): PortalSession {
 
 async function errorMessage(response: Response, fallback: string) {
   try {
-    const body = await response.json() as { detail?: string | Array<{ msg?: string }> };
+    // Check if response has content before trying to parse JSON
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+      return fallback;
+    }
+    const body = JSON.parse(text) as { detail?: string | Array<{ msg?: string }> };
     if (typeof body.detail === "string") return body.detail;
     if (Array.isArray(body.detail)) {
       const messages = body.detail.map((item) => item.msg).filter(Boolean);
@@ -71,7 +76,19 @@ export async function authenticateAccount(username: string, password: string, re
     body: JSON.stringify({ username, password, remember }),
   });
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể đăng nhập tài khoản."));
-  return toPortalSession((await response.json() as AuthenticationResponse).user);
+  
+  // Check if response has content before parsing
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
+  }
+  
+  try {
+    const data = JSON.parse(text) as AuthenticationResponse;
+    return toPortalSession(data.user);
+  } catch (error) {
+    throw new Error("Không thể xử lý response từ server. Response nhận được: " + text.substring(0, 100));
+  }
 }
 
 export async function registerAccount(input: RegistrationInput, remember: boolean) {
@@ -86,14 +103,38 @@ export async function registerAccount(input: RegistrationInput, remember: boolea
     }),
   });
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể tạo tài khoản."));
-  return toPortalSession((await response.json() as AuthenticationResponse).user);
+  
+  // Check if response has content before parsing
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
+  }
+  
+  try {
+    const data = JSON.parse(text) as AuthenticationResponse;
+    return toPortalSession(data.user);
+  } catch (error) {
+    throw new Error("Không thể xử lý response từ server. Response nhận được: " + text.substring(0, 100));
+  }
 }
 
 export async function restoreSession(): Promise<PortalSession | null> {
   const response = await authRequest("/me");
   if (response.status === 401) return null;
   if (!response.ok) throw new Error(await errorMessage(response, "Không thể kiểm tra phiên đăng nhập."));
-  return toPortalSession((await response.json() as AuthenticationResponse).user);
+  
+  // Check if response has content before parsing
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    throw new Error("Backend trả về response rỗng. Vui lòng kiểm tra kết nối.");
+  }
+  
+  try {
+    const data = JSON.parse(text) as AuthenticationResponse;
+    return toPortalSession(data.user);
+  } catch (error) {
+    throw new Error("Không thể xử lý response từ server.");
+  }
 }
 
 export async function logoutAccount() {
