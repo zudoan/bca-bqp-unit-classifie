@@ -1,0 +1,59 @@
+services:
+  # Backend FastAPI
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: bca-bqp-backend
+    ports:
+      - "7860:7860"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Persistent application database for user accounts.
+      USER_DATABASE_URL: ${USER_DATABASE_URL:-sqlite:////app/storage/users.db}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-Quản trị viên hệ thống}
+      # Google AI Studio Gemini API. Keep GEMINI_API_KEY outside source control.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_API_URL: ${GEMINI_API_URL:-https://generativelanguage.googleapis.com/v1beta}
+      GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-300}
+      GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-32768}
+    volumes:
+      - user-data:/app/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend React + Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bca-bqp-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: bca-bqp-network
+
+volumes:
+  user-data:
+    name: bca-bqp-user-data

@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN mkdir -p /app/storage
+
+# Copy requirements for backend only (no Gradio)
+COPY requirements-backend.txt .
+
+# Install dependencies from official PyPI
+RUN pip install --upgrade pip && \
+    pip install --default-timeout=600 \
+    --no-cache-dir -r requirements-backend.txt
+
+# Copy source code
+COPY api ./api
+COPY matching ./matching
+COPY preprocessing ./preprocessing
+COPY search ./search
+COPY data ./data
+
+# Expose port
+EXPOSE 7860
+
+# Run FastAPI only (no Gradio)
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
