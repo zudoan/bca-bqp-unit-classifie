@@ -355,8 +355,6 @@ function BatchUploadPanel() {
         </button>
       </form>
 
-      <div className="batch-note"><GoogleIcon name="verified_user" size={17} /><span>Chỉ PDF scan không đủ lớp văn bản mới được gửi tới Gemini API. Các dòng fuzzy chưa đủ chắc chắn vẫn nằm trong phụ lục “Chưa thể kết luận”.</span></div>
-
       {(error || summary) && (
         <div className={`batch-feedback ${error ? "is-error" : "is-success"}`} aria-live="polite">
           {error ? (
