@@ -17,6 +17,18 @@ services:
       GEMINI_API_URL: ${GEMINI_API_URL:-https://generativelanguage.googleapis.com/v1beta}
       GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-300}
       GEMINI_MAX_OUTPUT_TOKENS: ${GEMINI_MAX_OUTPUT_TOKENS:-32768}
+      # Admin account configuration
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123456}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-Quản trị viên hệ thống}
+      # Database
+      USER_DATABASE_URL: ${USER_DATABASE_URL:-sqlite:///storage/users.db}
+      # Security
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    volumes:
+      - user_data:/app/storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=5).read()"]
@@ -41,6 +53,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  user_data:
+    name: bca-bqp-user-data
 
 networks:
   default:
