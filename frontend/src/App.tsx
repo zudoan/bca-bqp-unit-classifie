@@ -325,7 +325,7 @@ function BatchUploadPanel() {
       <div className="batch-heading">
         <div className="batch-title-block">
           <span className="batch-icon"><GoogleIcon name="upload_file" size={25} /></span>
-          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel / PDF</h2><p>PDF có lớp văn bản được đọc nội bộ; PDF scan được nhận dạng bằng Gemini 2.5 Flash. Kết quả là ZIP gồm hai danh sách.</p></div>
+          <div><span className="section-code">BATCH IMPORT</span><h2 id="batch-title">Đối chiếu danh sách từ Word / Excel / PDF</h2><p>Kết quả là ZIP gồm hai danh sách.</p></div>
         </div>
         <span className="batch-limit">TỐI ĐA 10 MB · 5.000 DÒNG</span>
       </div>
