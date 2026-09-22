@@ -17,6 +17,9 @@ COPY preprocessing ./preprocessing
 COPY search ./search
 COPY data ./data
 
+# Create storage directory for database
+RUN mkdir -p /app/storage && chmod 777 /app/storage
+
 # Expose port
 EXPOSE 7860
 
